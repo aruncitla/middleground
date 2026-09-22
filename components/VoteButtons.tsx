@@ -1,6 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, type } from '@/lib/theme';
 
 type Props = {
@@ -12,55 +10,82 @@ type Props = {
 
 function VoteHit({
   label,
+  hint,
   selected,
+  tone,
   onPress,
 }: {
   label: string;
+  hint?: string;
   selected: boolean;
+  tone: 'yes' | 'no';
   onPress: () => void;
 }) {
-  const tap = Gesture.Tap().onEnd(() => {
-    runOnJS(onPress)();
-  });
   return (
-    <GestureDetector gesture={tap}>
-      <View
-        accessibilityRole="button"
-        accessibilityState={{ selected }}
-        style={[styles.choice, selected && styles.choiceOn]}
-      >
-        <Text style={[styles.label, selected && styles.labelOn]}>{label}</Text>
-      </View>
-    </GestureDetector>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={hint ? `${label}. ${hint}` : label}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.choice,
+        tone === 'yes' ? styles.yes : styles.no,
+        selected && styles.choiceOn,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text style={[styles.label, tone === 'yes' ? styles.yesLabel : styles.noLabel, selected && styles.labelOn]}>
+        {label}
+      </Text>
+      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+    </Pressable>
   );
 }
 
 export function VoteButtons({ onDisagree, onAgree, current, compact }: Props) {
   return (
     <View style={[styles.row, compact && styles.compact]}>
-      <VoteHit label="← No" selected={current === 'disagree'} onPress={onDisagree} />
-      <VoteHit label="Yes →" selected={current === 'agree'} onPress={onAgree} />
+      <VoteHit
+        label="NO"
+        hint={compact ? undefined : '← swipe left'}
+        selected={current === 'disagree'}
+        tone="no"
+        onPress={onDisagree}
+      />
+      <VoteHit
+        label="YES"
+        hint={compact ? undefined : 'swipe right →'}
+        selected={current === 'agree'}
+        tone="yes"
+        onPress={onAgree}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 12, paddingHorizontal: 20, zIndex: 20, elevation: 20 },
+  row: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, zIndex: 20, elevation: 20 },
   compact: { paddingHorizontal: 0 },
   choice: {
     flex: 1,
-    borderRadius: 12,
-    paddingVertical: 15,
+    minHeight: 56,
+    borderRadius: 14,
+    paddingVertical: 10,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    backgroundColor: colors.card,
   },
+  yes: { borderColor: 'rgba(34, 197, 94, 0.55)' },
+  no: { borderColor: 'rgba(239, 68, 68, 0.55)' },
   choiceOn: {
-    borderColor: colors.accentHover,
     backgroundColor: colors.accent,
-    boxShadow: '0 10px 28px rgba(99, 102, 241, 0.18)',
+    borderColor: colors.accentHover,
   },
-  label: { ...type.button, color: colors.muted },
+  pressed: { opacity: 0.85 },
+  label: { ...type.button, fontSize: 16, letterSpacing: 0.8 },
+  yesLabel: { color: '#4ade80' },
+  noLabel: { color: '#f87171' },
   labelOn: { color: colors.ink },
+  hint: { ...type.footnote, fontSize: 11, marginTop: 2, color: colors.muted },
 });

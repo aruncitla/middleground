@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { seatsThatShared } from '@/lib/entries';
+import { seatsThatShared, thoughtCount } from '@/lib/entries';
 import { rosterSeatIds, seatsStartedCount } from '@/lib/voteTally';
 import { colors, type } from '@/lib/theme';
 import type { Entry, Participant, Seat, Vote } from '@/types/room';
@@ -11,6 +11,7 @@ type Props = {
   votes?: Vote[];
   cardIds?: string[];
   showVotes?: boolean;
+  showShare?: boolean;
 };
 
 function Bar({ value, total }: { value: number; total: number }) {
@@ -29,34 +30,43 @@ export function ParticipationStats({
   votes = [],
   cardIds = [],
   showVotes = false,
+  showShare = true,
 }: Props) {
   const roster = seats?.length ? seats : participants;
   const total = roster.length;
+  const thoughts = thoughtCount(entries);
   const shared = seats?.length
     ? seatsThatShared(seats, entries)
-    : participants.filter((p) => (p.entryCount ?? 0) > 0).length;
+    : participants.filter((p) => entries.some((entry) => entry.authorId === p.id)).length;
   const voted = seatsStartedCount(rosterSeatIds(seats ?? [], participants), votes, cardIds);
-  if (total === 0) return null;
+  if (total === 0 && thoughts === 0) return null;
 
   const waitingShare = Math.max(0, total - shared);
   const waitingVote = Math.max(0, total - voted);
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.row}>
+      {showShare ? (
+        <View style={styles.row}>
+          <Text style={type.body}>
+            {thoughts} {thoughts === 1 ? 'thought' : 'thoughts'}
+            {total > 0 ? ` · ${shared} of ${total} shared` : ''}
+            {waitingShare > 0 ? ` · ${waitingShare === 1 ? '1 hasn’t yet' : `${waitingShare} haven’t yet`}` : ''}
+          </Text>
+          <Bar value={shared} total={Math.max(total, 1)} />
+        </View>
+      ) : thoughts > 0 ? (
         <Text style={type.body}>
-          {shared} of {total} shared thoughts
-          {waitingShare > 0 ? ` · ${waitingShare === 1 ? '1 hasn’t yet' : `${waitingShare} haven’t yet`}` : ''}
+          {thoughts} {thoughts === 1 ? 'thought' : 'thoughts'}
         </Text>
-        <Bar value={shared} total={total} />
-      </View>
+      ) : null}
       {showVotes ? (
         <View style={styles.row}>
           <Text style={type.body}>
             {voted} of {total} voted
             {waitingVote > 0 ? ` · ${waitingVote === 1 ? '1 hasn’t yet' : `${waitingVote} haven’t yet`}` : ''}
           </Text>
-          <Bar value={voted} total={total} />
+          <Bar value={voted} total={Math.max(total, 1)} />
         </View>
       ) : null}
     </View>

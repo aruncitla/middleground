@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Dimensions, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View, Platform } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   interpolate,
@@ -9,11 +9,10 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { voteLockHaptic } from '@/lib/haptic';
+import { armedSide, choiceFromSwipeDx, stampOpacity, swipeThresholdForWidth } from '@/lib/swipeVote';
 import { colors } from '@/lib/theme';
 import type { Card } from '@/types/room';
-
-const SCREEN_W = Dimensions.get('window').width;
-const THRESHOLD = 120;
 
 type Props = {
   card: Card;
@@ -23,18 +22,21 @@ type Props = {
 };
 
 export function SwipeCard({ card, stacked, onVote, mine }: Props) {
+  const { width: screenW } = useWindowDimensions();
   const x = useSharedValue(0);
   const y = useSharedValue(0);
   const originX = useSharedValue(0);
-  const started = useSharedValue(0);
+  const originY = useSharedValue(0);
+  const cardW = useSharedValue(Math.max(240, screenW - 32));
+  const armed = useSharedValue(0);
   const committed = useSharedValue(0);
 
   useEffect(() => {
     x.value = 0;
     y.value = 0;
-    started.value = 0;
+    armed.value = 0;
     committed.value = 0;
-  }, [card.id, x, y, started, committed]);
+  }, [card.id, x, y, armed, committed]);
 
   const vote = (choice: 'agree' | 'disagree') => {
     onVote(choice);
@@ -42,58 +44,95 @@ export function SwipeCard({ card, stacked, onVote, mine }: Props) {
 
   const pan = Gesture.Pan()
     .enabled(!stacked)
-    .activeOffsetX([-16, 16])
-    .failOffsetY([-28, 28])
+    .maxPointers(1)
+    .minDistance(0)
+    .shouldCancelWhenOutside(false)
     .onBegin((e) => {
       originX.value = e.absoluteX;
-      started.value = 1;
+      originY.value = e.absoluteY;
+      armed.value = 0;
       committed.value = 0;
     })
     .onUpdate((e) => {
-      if (started.value === 0) {
-        originX.value = e.absoluteX;
-        started.value = 1;
-        return;
-      }
-      // Screen X, not translationX: web touch translationX is inverted vs mouse.
+      if (committed.value !== 0) return;
+      // Screen X/Y, not translationX: web touch translationX is inverted vs mouse.
       x.value = e.absoluteX - originX.value;
-      y.value = e.translationY * 0.25;
+      y.value = e.absoluteY - originY.value;
+      const threshold = swipeThresholdForWidth(cardW.value);
+      const next = armedSide(x.value, threshold);
+      if (next !== 0 && next !== armed.value) {
+        armed.value = next;
+        runOnJS(voteLockHaptic)();
+      } else if (next === 0) {
+        armed.value = 0;
+      }
     })
     .onEnd(() => {
-      const dx = x.value;
-      if (dx > THRESHOLD) {
-        committed.value = 1;
-        x.value = withTiming(SCREEN_W, { duration: 220 }, () => runOnJS(vote)('agree'));
-      } else if (dx < -THRESHOLD) {
-        committed.value = -1;
-        x.value = withTiming(-SCREEN_W, { duration: 220 }, () => runOnJS(vote)('disagree'));
-      } else {
-        x.value = withSpring(0);
-        y.value = withSpring(0);
+      if (committed.value !== 0) return;
+      const threshold = swipeThresholdForWidth(cardW.value);
+      const choice = choiceFromSwipeDx(x.value, threshold);
+      if (choice) {
+        committed.value = choice === 'agree' ? 1 : -1;
+        const out = (choice === 'agree' ? 1 : -1) * Math.max(screenW, cardW.value) * 1.35;
+        x.value = withTiming(out, { duration: 180 }, () => {
+          runOnJS(vote)(choice);
+        });
+        return;
       }
+      x.value = withSpring(0, { damping: 18, stiffness: 180 });
+      y.value = withSpring(0, { damping: 18, stiffness: 180 });
+      armed.value = 0;
+    })
+    .onFinalize(() => {
+      if (committed.value !== 0) return;
+      x.value = withSpring(0, { damping: 18, stiffness: 180 });
+      y.value = withSpring(0, { damping: 18, stiffness: 180 });
+      armed.value = 0;
     });
 
-  const style = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: x.value },
-      { translateY: y.value },
-      { rotate: `${interpolate(x.value, [-200, 0, 200], [-12, 0, 12])}deg` },
-      { scale: stacked ? 0.94 : 1 },
-    ],
-  }));
+  const style = useAnimatedStyle(() => {
+    const rotate = interpolate(x.value, [-cardW.value, 0, cardW.value], [-14, 0, 14]);
+    return {
+      transform: [
+        { translateX: x.value },
+        { translateY: y.value },
+        { rotate: `${rotate}deg` },
+        { scale: stacked ? 0.95 : 1 },
+      ],
+      opacity: stacked ? 0.72 : 1,
+    };
+  });
 
-  const yesStyle = useAnimatedStyle(() => ({
-    opacity: committed.value === 1 ? 1 : interpolate(x.value, [40, THRESHOLD], [0, 1]),
-  }));
-  const nahStyle = useAnimatedStyle(() => ({
-    opacity: committed.value === -1 ? 1 : interpolate(x.value, [-THRESHOLD, -40], [1, 0]),
-  }));
+  const yesStyle = useAnimatedStyle(() => {
+    const threshold = swipeThresholdForWidth(cardW.value);
+    const show = x.value > 0 || committed.value === 1;
+    return {
+      opacity: show ? stampOpacity(committed.value === 1 ? threshold : x.value, threshold) : 0,
+    };
+  });
+  const nahStyle = useAnimatedStyle(() => {
+    const threshold = swipeThresholdForWidth(cardW.value);
+    const show = x.value < 0 || committed.value === -1;
+    return {
+      opacity: show ? stampOpacity(committed.value === -1 ? threshold : x.value, threshold) : 0,
+    };
+  });
 
   const merged = (card.sourceCount ?? card.sourceEntryIds?.length ?? 0) > 1;
 
   return (
     <GestureDetector gesture={pan}>
-      <Animated.View style={[styles.card, stacked && styles.back, style]}>
+      <Animated.View
+        onLayout={(e) => {
+          cardW.value = e.nativeEvent.layout.width;
+        }}
+        style={[
+          styles.card,
+          stacked ? styles.back : styles.front,
+          Platform.OS === 'web' ? { touchAction: 'none', userSelect: 'none', cursor: stacked ? 'default' : 'grab' } : null,
+          style,
+        ]}
+      >
         {mine ? <Text style={styles.note}>Your thought is on this card</Text> : null}
         {merged ? (
           <Text style={styles.note}>
@@ -101,14 +140,12 @@ export function SwipeCard({ card, stacked, onVote, mine }: Props) {
           </Text>
         ) : null}
         <Text style={styles.body}>{card.text}</Text>
-        <Animated.Text style={[styles.stamp, styles.yes, yesStyle]}>Yes</Animated.Text>
-        <Animated.Text style={[styles.stamp, styles.nah, nahStyle]}>No</Animated.Text>
-        {stacked ? null : (
-          <>
-            <Text style={styles.edgeHintLeft}>← No</Text>
-            <Text style={styles.edgeHintRight}>Yes →</Text>
-          </>
-        )}
+        <Animated.Text pointerEvents="none" style={[styles.stamp, styles.yes, yesStyle]}>
+          YES
+        </Animated.Text>
+        <Animated.Text pointerEvents="none" style={[styles.stamp, styles.nah, nahStyle]}>
+          NO
+        </Animated.Text>
         {stacked ? <View pointerEvents="none" style={styles.lock} /> : null}
       </Animated.View>
     </GestureDetector>
@@ -118,19 +155,25 @@ export function SwipeCard({ card, stacked, onVote, mine }: Props) {
 const styles = StyleSheet.create({
   card: {
     position: 'absolute',
-    left: 12,
-    right: 12,
-    height: 340,
+    left: 16,
+    right: 16,
+    top: 8,
+    bottom: 8,
     backgroundColor: colors.surface,
     borderRadius: 22,
     padding: 24,
     borderWidth: 1,
     borderColor: colors.border,
-    boxShadow: '0 24px 60px rgba(0,0,0,0.35)',
-    backdropFilter: 'blur(24px)',
     justifyContent: 'center',
   },
-  back: { top: 14 },
+  front: {
+    zIndex: 2,
+    boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
+  },
+  back: {
+    zIndex: 1,
+    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+  },
   note: {
     position: 'absolute',
     top: 18,
@@ -151,32 +194,33 @@ const styles = StyleSheet.create({
   },
   stamp: {
     position: 'absolute',
-    top: 56,
-    fontSize: 44,
+    top: 28,
+    fontSize: 42,
     fontFamily: 'Inter',
     fontWeight: '700',
-    letterSpacing: -0.8,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
+    zIndex: 4,
   },
-  yes: { right: 18, color: colors.accentHover, transform: [{ rotate: '12deg' }] },
-  nah: { left: 18, color: colors.muted, transform: [{ rotate: '-12deg' }] },
-  edgeHintLeft: {
-    position: 'absolute',
-    left: 24,
-    bottom: 22,
-    color: colors.faint,
-    fontFamily: 'Inter',
-    fontWeight: '500',
-    fontSize: 13,
+  yes: {
+    left: 16,
+    color: '#22c55e',
+    borderWidth: 4,
+    borderColor: '#22c55e',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    transform: [{ rotate: '-14deg' }],
   },
-  edgeHintRight: {
-    position: 'absolute',
-    right: 24,
-    bottom: 22,
-    color: colors.faint,
-    fontFamily: 'Inter',
-    fontWeight: '500',
-    fontSize: 13,
+  nah: {
+    right: 16,
+    color: colors.danger,
+    borderWidth: 4,
+    borderColor: colors.danger,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    transform: [{ rotate: '14deg' }],
   },
   lock: { ...StyleSheet.absoluteFillObject },
 });

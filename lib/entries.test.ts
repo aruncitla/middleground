@@ -1,4 +1,4 @@
-import { entryBelongsToSeat, seatEntryCount, seatsThatShared } from './entries';
+import { entryBelongsToSeat, seatEntryCount, seatsThatShared, thoughtCount } from './entries';
 import type { Entry, Seat } from '@/types/room';
 
 function assert(cond: unknown, msg: string) {
@@ -21,5 +21,7 @@ assert(seatEntryCount(entries, ada) === 1 && seatEntryCount(entries, adaTwo) ===
 assert(seatsThatShared([ada, adaTwo, guest], entries) === 3, 'two seats on one uid both count as shared');
 assert(entryBelongsToSeat(entries[2]!, guest), 'legacy entries still belong to the uid seat');
 assert(seatEntryCount(entries, ada) !== 2, 'uid-global counts are not used');
+assert(thoughtCount(entries) === 3, 'thought count comes from the live thought list');
+assert(thoughtCount([...entries, { id: 'e4', authorId: 'u1', text: '   ' }]) === 3, 'blank thoughts are not counted');
 
 console.log('entry tests ok');

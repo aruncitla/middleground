@@ -13,3 +13,7 @@ export function seatEntryCount(entries: Entry[], seat: Pick<Seat, 'id'> | null) 
 export function seatsThatShared(seats: Seat[], entries: Entry[]) {
   return seats.filter((seat) => entries.some((entry) => entryBelongsToSeat(entry, seat))).length;
 }
+
+export function thoughtCount(entries: Pick<Entry, 'text'>[]) {
+  return entries.filter((entry) => entry.text.trim().length > 0).length;
+}

@@ -52,16 +52,6 @@ export default function SwipeCardScreen() {
   const cardIds = useMemo(() => visibleCards.map((card) => card.id), [visibleCards]);
   const rosterIds = useMemo(() => rosterSeatIds(seats, participants), [seats, participants]);
 
-  const myChoiceByCard = useMemo(() => {
-    const map = new Map<string, 'agree' | 'disagree'>();
-    if (!activeSeatId) return map;
-    for (const card of visibleCards) {
-      const choice = choiceForSeat(mergedVotes, activeSeatId, card.id);
-      if (choice) map.set(card.id, choice);
-    }
-    return map;
-  }, [mergedVotes, activeSeatId, visibleCards]);
-
   const remainingForActive = useMemo(() => {
     if (!activeSeatId) return visibleCards;
     return visibleCards.filter((card) => !choiceForSeat(mergedVotes, activeSeatId, card.id));
@@ -75,8 +65,6 @@ export default function SwipeCardScreen() {
     Boolean(card?.sourceEntryIds?.some((id) => myEntryIds.has(id)));
   const isHost = Boolean(user && room && user.uid === room.hostId);
   const allVoted = allSeatsCompletedDeck(rosterIds, mergedVotes, cardIds);
-  const myVoteCount = myChoiceByCard.size;
-  const isLateJoiner = visibleCards.length > 0 && myVoteCount === 0;
 
   const voteEnds = room?.votesCloseAt;
   const voteTimedOut = Boolean(voteEnds && now >= voteEnds.getTime());
@@ -170,24 +158,19 @@ export default function SwipeCardScreen() {
         <View style={styles.header}>
           <BrandMark size="sm" />
           <RoomStageBar stage="vote" />
-          <Text style={type.kicker}>Vote</Text>
           <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
             <Text style={controls.ghostText}>
               {avatar.emoji} {session.seat.displayName} · Switch seat
             </Text>
           </Pressable>
-          <Text style={type.title} numberOfLines={2}>
+          <Text style={type.title} numberOfLines={1}>
             {room?.topic}
           </Text>
-          {isLateJoiner ? (
-            <Text style={type.body}>You’re voting on what the group already wrote.</Text>
-          ) : null}
-          <Text style={type.body}>Swipe right for yes, left for no. Or tap the buttons. You can change a vote until time’s up.</Text>
           <Text style={type.body}>
             {Math.max(visibleCards.length - remaining.length, 0)} / {visibleCards.length} · {remaining.length} left
           </Text>
           {voteEnds ? (
-            <Text style={voteTimedOut ? styles.closed : type.body}>
+            <Text style={voteTimedOut ? styles.closed : type.footnote}>
               {voteTimedOut ? 'Time’s up — wrapping up votes…' : formatVoteDeadline(voteEnds)}
             </Text>
           ) : null}
@@ -198,6 +181,7 @@ export default function SwipeCardScreen() {
             votes={mergedVotes}
             cardIds={cardIds}
             showVotes
+            showShare={false}
           />
         </View>
 
@@ -232,7 +216,9 @@ export default function SwipeCardScreen() {
         </View>
 
         {top && votingOpen ? (
-          <VoteButtons onAgree={() => void vote(top.id, 'agree', session.seat.id)} onDisagree={() => void vote(top.id, 'disagree', session.seat.id)} />
+          <View style={styles.footer}>
+            <VoteButtons onAgree={() => void vote(top.id, 'agree', session.seat.id)} onDisagree={() => void vote(top.id, 'disagree', session.seat.id)} />
+          </View>
         ) : null}
 
         {mergedVotes.length === 0 && votingOpen ? (
@@ -266,17 +252,18 @@ export default function SwipeCardScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, paddingTop: 12, paddingBottom: 20, gap: 8 },
-  header: { paddingHorizontal: 20, gap: 6 },
+  page: { flex: 1, paddingTop: 8, paddingBottom: 8 },
+  header: { paddingHorizontal: 20, gap: 4, flexShrink: 0 },
   closed: { ...type.footnote, color: colors.accentHover },
-  deck: { flex: 1, minHeight: 280, marginTop: 8, overflow: 'hidden' },
+  deck: { flex: 1, minHeight: 200, marginTop: 4 },
   empty: {
     marginHorizontal: 20,
     ...controls.panel,
-    minHeight: 220,
+    minHeight: 180,
     justifyContent: 'center',
     gap: 12,
   },
+  footer: { flexShrink: 0, paddingTop: 8, paddingBottom: 4, backgroundColor: colors.bg },
   results: { marginHorizontal: 20, marginTop: 12 },
   hint: { marginHorizontal: 20 },
 });
