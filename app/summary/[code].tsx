@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ConsensusSummaryCard, phraseFromCardText } from '@/components/ConsensusSummaryCard';
 import { Screen } from '@/components/Screen';
+import { SeatGate } from '@/components/SeatGate';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
 import { BrandMark } from '@/components/BrandMark';
@@ -13,9 +14,12 @@ import { VoteButtons } from '@/components/VoteButtons';
 import { isGenericFillerText } from '@/lib/cardQuality';
 import { formatVoteDeadline } from '@/lib/formatEnds';
 import { shareConsensusCard } from '@/lib/shareConsensus';
-import { castVote, closeVotingIfOpen, joinRoom, recordUnanimousAgreements, startRoundTwo } from '@/lib/roomService';
+import { avatarById } from '@/lib/theme';
+import { containerCodeOf, castVote, closeVotingIfOpen, joinRoom, recordUnanimousAgreements, reopenThoughts, startRoundTwo } from '@/lib/roomService';
+import { voteBelongsToSeat, voterId } from '@/lib/seatsLocal';
+import { mergeVotes, optimisticVote, withVoteTallies } from '@/lib/voteTally';
 import { colors, controls, type } from '@/lib/theme';
-import type { Card } from '@/types/room';
+import type { Card, Seat, Vote } from '@/types/room';
 
 type Bucket = 'everyone' | 'many' | 'some' | 'none';
 
@@ -44,7 +48,10 @@ export default function SummaryScreen() {
   const code = String(raw ?? '').toUpperCase();
   const router = useRouter();
   const { user, loading: authLoading, error: authError } = useGuestAuth();
-  const { room, cards, participants, votes, agreements, ready } = useRoom(code);
+  const { room, cards, participants, votes, agreements, seats, ready } = useRoom(code);
+  const container = room ? containerCodeOf(room) : undefined;
+  const [activeSeat, setActiveSeat] = useState<Seat | null>(null);
+  const [localVotes, setLocalVotes] = useState<Vote[]>([]);
   const [busy, setBusy] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [pendingDiscussionId, setPendingDiscussionId] = useState<string | null>(null);
@@ -52,9 +59,16 @@ export default function SummaryScreen() {
   const cardRef = useRef<View>(null);
   const endingRef = useRef(false);
 
+  useEffect(() => {
+    setLocalVotes([]);
+  }, [code]);
+
+  const mergedVotes = useMemo(() => mergeVotes(votes, localVotes), [votes, localVotes]);
+  const talliedCards = useMemo(() => withVoteTallies(cards, mergedVotes), [cards, mergedVotes]);
+
   const reportCards = useMemo(
-    () => cards.filter((c) => !isGenericFillerText(c.text)),
-    [cards],
+    () => talliedCards.filter((c) => !isGenericFillerText(c.text)),
+    [talliedCards],
   );
 
   const grouped = useMemo(() => {
@@ -72,18 +86,18 @@ export default function SummaryScreen() {
   const voteEnds = room?.votesCloseAt;
   const voteTimedOut = Boolean(voteEnds && now >= voteEnds.getTime());
   const votingOpen = isEarly && !voteTimedOut;
-  const votedIds = useMemo(() => new Set(votes.map((v) => v.uid)), [votes]);
-  const waitingVote = Math.max(0, participants.length - votedIds.size);
-  const allVoted = participants.length > 0 && waitingVote === 0;
+  const roster = seats.length ? seats : participants;
+  const votedIds = useMemo(() => new Set(mergedVotes.map((v) => voterId(v))), [mergedVotes]);
+  const waitingVote = Math.max(0, roster.length - votedIds.size);
+  const allVoted = roster.length > 0 && waitingVote === 0;
   const canHostEnd = isHost && isEarly && (allVoted || voteTimedOut);
   const myChoiceByCard = useMemo(() => {
     const map = new Map<string, 'agree' | 'disagree'>();
-    if (!user) return map;
-    for (const vote of votes) {
-      if (vote.uid === user.uid) map.set(vote.cardId, vote.choice);
+    for (const vote of mergedVotes) {
+      if (voteBelongsToSeat(vote, activeSeat, user?.uid)) map.set(vote.cardId, vote.choice);
     }
     return map;
-  }, [votes, user]);
+  }, [mergedVotes, activeSeat, user?.uid]);
   const hasVotes = reportCards.some((c) => voteTotal(c) > 0);
   const isFollowUp = Boolean(room?.parentRoomId);
   const splitCount = grouped.many.length + grouped.some.length + grouped.none.length;
@@ -155,6 +169,17 @@ export default function SummaryScreen() {
     }
   };
 
+  const onReopen = async () => {
+    setBusy(true);
+    try {
+      await reopenThoughts(code);
+    } catch (e) {
+      Alert.alert('Could not reopen', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onShare = async () => {
     if (!room) return;
     setSharing(true);
@@ -170,12 +195,18 @@ export default function SummaryScreen() {
     }
   };
 
-  const onVote = async (cardId: string, choice: 'agree' | 'disagree') => {
-    if (!user || busy || !votingOpen) return;
+  const onVote = async (cardId: string, choice: 'agree' | 'disagree', seatId?: string) => {
+    const sid = seatId || activeSeat?.id;
+    if (!user || !sid || busy || !votingOpen) return;
+    const found = seats.find((s) => s.id === sid);
+    if (found && found.id !== activeSeat?.id) setActiveSeat(found);
+    const next = optimisticVote({ uid: user.uid, seatId: sid, cardId, choice });
+    setLocalVotes((prev) => mergeVotes(prev, [next]));
     setBusy(true);
     try {
-      await castVote(code, user.uid, cardId, choice);
+      await castVote(code, user.uid, cardId, choice, sid);
     } catch (e) {
+      setLocalVotes((prev) => prev.filter((v) => v.id !== next.id));
       Alert.alert('Vote failed', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -202,10 +233,27 @@ export default function SummaryScreen() {
 
   return (
     <Screen loading={authLoading || !ready} error={authError}>
+      <SeatGate containerCode={container} topicCode={code} uid={user?.uid} onSeatChange={setActiveSeat}>
+        {(session) => {
+          const avatar = avatarById(session.seat.avatarId);
+          return (
       <ScrollView contentContainerStyle={styles.page}>
         <BrandMark size="sm" />
         <RoomStageBar stage="results" />
         <Text style={type.kicker}>{isEarly ? 'Early results' : 'Results'}</Text>
+        <Pressable
+          onPress={() =>
+            router.push(`/room/${room?.containerId || room?.parentRoomId || code}${code !== (room?.containerId || room?.parentRoomId || code) ? `?topic=${code}` : ''}`)
+          }
+          accessibilityRole="button"
+        >
+          <Text style={controls.ghostText}>Room home</Text>
+        </Pressable>
+        <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
+          <Text style={controls.ghostText}>
+            {avatar.emoji} {session.seat.displayName} · Switch seat
+          </Text>
+        </Pressable>
         <Text style={type.title}>{room?.topic}</Text>
         {isEarly ? (
           <>
@@ -221,7 +269,18 @@ export default function SummaryScreen() {
                     : `Voting is still open · ${waitingVote} people haven’t voted yet.`}
             </Text>
             {voteEnds ? <Text style={type.body}>{formatVoteDeadline(voteEnds, now)}</Text> : null}
-            <ParticipationStats participants={participants} votes={votes} showVotes />
+            <ParticipationStats participants={participants} seats={session.seats} votes={mergedVotes} showVotes />
+            {mergedVotes.length === 0 && votingOpen ? (
+              <>
+                <Button
+                  disabled={busy}
+                  variant="secondary"
+                  label={busy ? 'Working…' : 'Back to sharing thoughts'}
+                  onPress={() => void onReopen()}
+                />
+                <Text style={type.footnote}>No one has voted yet. You can reopen thoughts for everyone.</Text>
+              </>
+            ) : null}
             {isHost ? (
               <>
                 <Button
@@ -248,7 +307,7 @@ export default function SummaryScreen() {
               phrases={sharePhrases}
               agreedCount={agreedCount}
               pointCount={pointCount}
-              participantCount={participants.length}
+              participantCount={seats.length || participants.length}
               elapsedLabel={isFollowUp ? 'Follow-up session' : 'Group session'}
             />
             <Button
@@ -297,13 +356,18 @@ export default function SummaryScreen() {
                     <Text style={[styles.kind, { color: section.labelColor }]}>
                       {card.agreeCount} yes · {card.disagreeCount} no
                     </Text>
+                    {(card.sourceCount ?? card.sourceEntryIds?.length ?? 0) > 1 ? (
+                      <Text style={type.footnote}>
+                        {card.sourceCount ?? card.sourceEntryIds?.length} similar thoughts merged
+                      </Text>
+                    ) : null}
                     <Text style={styles.body}>{card.text}</Text>
                     {votingOpen ? (
                       <VoteButtons
                         compact
                         current={myChoiceByCard.get(card.id)}
-                        onAgree={() => void onVote(card.id, 'agree')}
-                        onDisagree={() => void onVote(card.id, 'disagree')}
+                        onAgree={() => void onVote(card.id, 'agree', session.seat.id)}
+                        onDisagree={() => void onVote(card.id, 'disagree', session.seat.id)}
                       />
                     ) : canStart && pendingDiscussionId === card.id ? (
                       <View style={styles.confirm}>
@@ -340,6 +404,9 @@ export default function SummaryScreen() {
           );
         })}
       </ScrollView>
+          );
+        }}
+      </SeatGate>
     </Screen>
   );
 }

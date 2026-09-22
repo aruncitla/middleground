@@ -1,9 +1,11 @@
 import { StyleSheet, Text, View } from 'react-native';
+import { voterId } from '@/lib/seatsLocal';
 import { colors, type } from '@/lib/theme';
-import type { Participant, Vote } from '@/types/room';
+import type { Participant, Seat, Vote } from '@/types/room';
 
 type Props = {
   participants: Participant[];
+  seats?: Seat[];
   votes?: Vote[];
   showVotes?: boolean;
 };
@@ -17,14 +19,14 @@ function Bar({ value, total }: { value: number; total: number }) {
   );
 }
 
-export function ParticipationStats({ participants, votes = [], showVotes = false }: Props) {
-  const total = participants.length;
+export function ParticipationStats({ participants, seats, votes = [], showVotes = false }: Props) {
+  const total = seats?.length || participants.length;
   const shared = participants.filter((p) => (p.entryCount ?? 0) > 0).length;
-  const voted = new Set(votes.map((v) => v.uid)).size;
+  const voted = new Set(votes.map((v) => voterId(v))).size;
   if (total === 0) return null;
 
-  const waitingShare = total - shared;
-  const waitingVote = total - voted;
+  const waitingShare = Math.max(0, total - shared);
+  const waitingVote = Math.max(0, total - voted);
 
   return (
     <View style={styles.wrap}>

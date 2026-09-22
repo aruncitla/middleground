@@ -8,12 +8,13 @@ import { ParticipantCluster } from '@/components/ParticipantCluster';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { Screen } from '@/components/Screen';
+import { SeatGate } from '@/components/SeatGate';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
 import { callSynthesizeRoom, mockSynthesize } from '@/lib/aiSynthesis';
-import { closeThoughts, submitEntry, writeSynthesizedCards } from '@/lib/roomService';
+import { avatarById, colors, controls, type } from '@/lib/theme';
+import { closeThoughts, containerCodeOf, reopenThoughts, submitEntry, writeSynthesizedCards } from '@/lib/roomService';
 import { formatEndedAt, formatEndsAt } from '@/lib/formatEnds';
-import { colors, controls, type } from '@/lib/theme';
 import type { CloseReason, Participant, Room } from '@/types/room';
 
 function closedBanner(room: Room, participants: Participant[]) {
@@ -28,9 +29,11 @@ export default function LobbyScreen() {
   const code = String(raw ?? '').toUpperCase();
   const router = useRouter();
   const { user, loading: authLoading, error: authError } = useGuestAuth();
-  const { room, participants, entries, ready } = useRoom(code);
+  const { room, participants, entries, seats, ready } = useRoom(code);
+  const container = room ? containerCodeOf(room) : undefined;
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const [now, setNow] = useState(Date.now());
   const closingRef = useRef(false);
 
@@ -76,6 +79,26 @@ export default function LobbyScreen() {
     void runClose('timeout');
   }, [user?.uid, room?.status, timedOut, entries.length]);
 
+  const onLeave = () => {
+    router.replace('/');
+  };
+
+  const onConfirmClose = async () => {
+    await runClose('manual');
+    setConfirmingClose(false);
+  };
+
+  const onReopen = async () => {
+    setBusy(true);
+    try {
+      await reopenThoughts(code);
+    } catch (e) {
+      Alert.alert('Could not reopen', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onSubmit = async () => {
     if (!user) return;
     setBusy(true);
@@ -91,38 +114,63 @@ export default function LobbyScreen() {
 
   return (
     <Screen loading={authLoading || !ready} error={authError || (!room && ready ? 'Room not found' : null)}>
+      <SeatGate containerCode={container} topicCode={code} uid={user?.uid}>
+        {(session) => {
+          const memberCount = session.seats.length || participants.length || seats.length;
+          const avatar = avatarById(session.seat.avatarId);
+          return (
       <View style={styles.page}>
         <BrandMark size="sm" />
         <RoomStageBar stage="thoughts" />
         <Text style={type.kicker}>Lobby</Text>
         {room?.parentRoomId ? (
           <Pressable onPress={() => router.replace(`/summary/${room.parentRoomId}`)} accessibilityRole="button">
-            <Text style={controls.ghostText}>Follow-up of {room.parentRoomId} · back to original</Text>
+            <Text style={controls.ghostText}>Sub-topic of {room.parentRoomId} · back to original</Text>
           </Pressable>
         ) : null}
+        <Pressable
+          onPress={() => router.push(`/room/${room ? (room.containerId || room.parentRoomId || code) : code}`)}
+          accessibilityRole="button"
+        >
+          <Text style={controls.ghostText}>Room home</Text>
+        </Pressable>
+        <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
+          <Text style={controls.ghostText}>
+            {avatar.emoji} {session.seat.displayName} · Switch seat
+          </Text>
+        </Pressable>
         <Pressable onPress={() => void Clipboard.setStringAsync(code)} accessibilityRole="button">
           <Text style={controls.ghostText}>Tap to copy code</Text>
         </Pressable>
         <Text style={type.title}>{room?.topic}</Text>
         <Text style={type.body}>
-          {participants.length} in the room · {entries.length} thoughts · 10 each
+          {memberCount} in the room · {entries.length} thoughts · 10 each
         </Text>
-        <ParticipationStats participants={participants} />
+        <ParticipationStats participants={participants} seats={session.seats} />
         {room?.status === 'lobby' && room.closesAt ? (
           <Text style={timedOut ? styles.closed : type.body}>
             {timedOut
               ? entries.length === 0
                 ? `Time’s up (${formatEndedAt(room.closesAt)}). Add a thought, then close.`
                 : 'Time’s up — closing thoughts…'
-              : `${formatEndsAt(room.closesAt)} · anyone can close sooner`}
+              : `${formatEndsAt(room.closesAt)} · anyone can close thoughts for everyone sooner`}
           </Text>
         ) : null}
-        <ParticipantCluster participants={participants} />
+        <ParticipantCluster participants={participants} seats={session.seats} />
 
         {room?.status === 'synthesizing' ? (
-          <Text style={styles.wait}>
-            {closedBanner(room, participants)} Cooking up the cards…
-          </Text>
+          <>
+            <Text style={styles.wait}>
+              {closedBanner(room, participants)} Cooking up the cards…
+            </Text>
+            <Button
+              disabled={busy}
+              variant="secondary"
+              label={busy ? 'Working…' : 'Back to sharing thoughts'}
+              onPress={() => void onReopen()}
+            />
+            <Text style={type.footnote}>No one has voted yet. You can reopen thoughts for everyone.</Text>
+          </>
         ) : (
           <>
             <Text style={[type.label, styles.label]}>Your take ({remaining} left)</Text>
@@ -140,15 +188,46 @@ export default function LobbyScreen() {
         )}
 
         {room?.status === 'lobby' ? (
-          <Button
-            disabled={busy || entries.length === 0}
-            onPress={() => void runClose('manual')}
-            variant="secondary"
-            label={busy ? 'Working…' : 'Close thoughts'}
-            style={styles.lock}
-          />
+          confirmingClose ? (
+            <View style={styles.confirm}>
+              <Text style={type.section}>Close thoughts for everyone?</Text>
+              <Text style={type.body}>
+                This will close thoughts for all users and proceed to voting.
+              </Text>
+              <Button
+                disabled={busy}
+                label={busy ? 'Working…' : 'Close for everyone'}
+                onPress={() => void onConfirmClose()}
+              />
+              <Button
+                disabled={busy}
+                variant="secondary"
+                label="Cancel"
+                onPress={() => setConfirmingClose(false)}
+              />
+            </View>
+          ) : (
+            <View style={styles.actions}>
+              <Button
+                disabled={busy}
+                variant="secondary"
+                label="Leave for now"
+                onPress={onLeave}
+              />
+              <Text style={type.footnote}>Goes home. The group can keep sharing thoughts.</Text>
+              <Button
+                disabled={busy || entries.length === 0}
+                variant="secondary"
+                label="Close thoughts for everyone"
+                onPress={() => setConfirmingClose(true)}
+              />
+            </View>
+          )
         ) : null}
       </View>
+          );
+        }}
+      </SeatGate>
     </Screen>
   );
 }
@@ -159,5 +238,6 @@ const styles = StyleSheet.create({
   closed: { ...type.footnote, color: colors.accentHover },
   label: { marginTop: 8 },
   area: { minHeight: 90, textAlignVertical: 'top' },
-  lock: { marginTop: 'auto' },
+  actions: { marginTop: 'auto', gap: 8 },
+  confirm: { marginTop: 'auto', ...controls.panel, gap: 10 },
 });

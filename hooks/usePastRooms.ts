@@ -1,81 +1,76 @@
-import { useEffect, useState } from 'react';
-import { loadFollowUpCodes, loadRoomPreview, subscribeMyRoomCodes } from '@/lib/roomService';
-import type { RoomPreview } from '@/types/room';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { loadSavedRoom, subscribeMyRoomCodes } from '@/lib/roomService';
+import type { SavedRoom } from '@/types/room';
 
-export type PastDiscussion = {
-  room: RoomPreview;
-  children: RoomPreview[];
-};
-
-function nestPreviews(rows: RoomPreview[]): PastDiscussion[] {
-  const byCode = new Map(rows.map((row) => [row.code, row]));
-  const nested = new Set<string>();
-  const children = new Map<string, RoomPreview[]>();
-
-  for (const row of rows) {
-    const parent = row.parentRoomId;
-    if (!parent || !byCode.has(parent)) continue;
-    nested.add(row.code);
-    const list = children.get(parent) ?? [];
-    list.push(row);
-    children.set(parent, list);
-  }
-
-  const byDate = (a: RoomPreview, b: RoomPreview) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0);
-
-  return rows
-    .filter((row) => !nested.has(row.code))
-    .sort(byDate)
-    .map((row) => ({
-      room: row,
-      children: (children.get(row.code) ?? []).sort(byDate),
-    }));
+async function loadRooms(codes: string[]) {
+  const unique = [...new Set(codes)];
+  const loaded = (
+    await Promise.all(
+      unique.map(async (code) => {
+        try {
+          return await loadSavedRoom(code);
+        } catch {
+          return null;
+        }
+      }),
+    )
+  ).filter((row): row is SavedRoom => Boolean(row));
+  const byCode = new Map<string, SavedRoom>();
+  for (const row of loaded) byCode.set(row.code, row);
+  return [...byCode.values()].sort(
+    (a, b) => (b.created?.getTime() ?? 0) - (a.created?.getTime() ?? 0),
+  );
 }
 
-export function usePastRooms(uid: string | undefined) {
-  const [rooms, setRooms] = useState<PastDiscussion[]>([]);
+export function useSavedRooms(uid: string | undefined) {
+  const [rooms, setRooms] = useState<SavedRoom[]>([]);
   const [loading, setLoading] = useState(Boolean(uid));
+  const [codes, setCodes] = useState<string[]>([]);
+  const [codesReady, setCodesReady] = useState(false);
 
   useEffect(() => {
     if (!uid) {
       setRooms([]);
+      setCodes([]);
+      setCodesReady(false);
       setLoading(false);
       return;
     }
     setLoading(true);
-    let cancelled = false;
-    const unsub = subscribeMyRoomCodes(uid, (codes) => {
-      void (async () => {
-        try {
-          const history = (await Promise.all(codes.map((code) => loadRoomPreview(code)))).filter(
-            (row): row is RoomPreview => Boolean(row),
-          );
-          const extra = new Set<string>();
-          await Promise.all(
-            history
-              .filter((row) => !row.parentRoomId)
-              .map(async (row) => {
-                const childCodes = await loadFollowUpCodes(row.code);
-                for (const code of childCodes) extra.add(code);
-              }),
-          );
-          const missing = [...extra].filter((code) => !history.some((row) => row.code === code));
-          const discovered = (await Promise.all(missing.map((code) => loadRoomPreview(code)))).filter(
-            (row): row is RoomPreview => Boolean(row),
-          );
-          if (!cancelled) setRooms(nestPreviews([...history, ...discovered]));
-        } catch {
-          if (!cancelled) setRooms([]);
-        } finally {
-          if (!cancelled) setLoading(false);
-        }
-      })();
+    setCodesReady(false);
+    return subscribeMyRoomCodes(uid, (next) => {
+      setCodes(next);
+      setCodesReady(true);
     });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
   }, [uid]);
 
-  return { rooms, loading };
+  const refresh = useCallback(async (nextCodes: string[]) => {
+    if (!uid) return;
+    setLoading(true);
+    try {
+      const rows = await loadRooms(nextCodes);
+      setRooms(rows);
+    } catch {
+      setRooms([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid || !codesReady) return;
+    void refresh(codes);
+  }, [uid, codes, codesReady, refresh]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!uid || !codesReady) return;
+      void refresh(codes);
+    }, [uid, codes, codesReady, refresh]),
+  );
+
+  return { rooms, loading, refresh: () => refresh(codes) };
 }
+
+export const usePastRooms = useSavedRooms;

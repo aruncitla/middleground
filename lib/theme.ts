@@ -160,6 +160,7 @@ export const avatars = [
   { id: 'fire', emoji: '🔥', color: '#431407' },
   { id: 'rainbow', emoji: '🌈', color: '#312e81' },
   { id: 'robot', emoji: '👾', color: '#1e293b' },
+  { id: 'hat', emoji: '🎩', color: '#1c1917' },
 ] as const;
 
 export type AvatarId = (typeof avatars)[number]['id'];

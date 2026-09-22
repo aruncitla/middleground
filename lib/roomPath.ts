@@ -5,3 +5,8 @@ export function pathForRoom(code: string, status: RoomStatus | string | undefine
   if (status === 'summary') return `/summary/${code}`;
   return `/lobby/${code}`;
 }
+
+export function pathForSavedRoom(containerCode: string, topicCode?: string) {
+  if (topicCode && topicCode !== containerCode) return `/room/${containerCode}?topic=${topicCode}`;
+  return `/room/${containerCode}`;
+}

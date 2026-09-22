@@ -1,6 +1,8 @@
 export type RoomStatus = 'lobby' | 'synthesizing' | 'swiping' | 'summary';
 export type CloseReason = 'manual' | 'timeout';
 export type CloseWindowId = '1h' | '1d';
+export type RoomKind = 'group' | 'topic' | 'subtopic';
+export type TopicMode = 'debate' | 'hot-takes' | 'bracket' | 'predictions';
 
 export type Room = {
   id: string;
@@ -9,6 +11,10 @@ export type Room = {
   status: RoomStatus;
   entryLimit: number;
   round: number;
+  name?: string;
+  kind?: RoomKind;
+  containerId?: string;
+  mode?: TopicMode;
   parentRoomId?: string;
   parentCardId?: string;
   closesAt?: Date;
@@ -16,6 +22,7 @@ export type Room = {
   closeWindow?: CloseWindowId;
   closedBy?: string;
   closeReason?: CloseReason;
+  createdAt?: Date;
 };
 
 export type Participant = {
@@ -41,6 +48,8 @@ export type Card = {
   order: number;
   agreeCount: number;
   disagreeCount: number;
+  sourceEntryIds?: string[];
+  sourceCount?: number;
 };
 
 export type Vote = {
@@ -48,11 +57,21 @@ export type Vote = {
   uid: string;
   cardId: string;
   choice: 'agree' | 'disagree';
+  seatId?: string;
+};
+
+export type Seat = {
+  id: string;
+  displayName: string;
+  avatarId: string;
+  claimerUids: string[];
 };
 
 export type SynthesisCard = {
   text: string;
   kind: CardKind;
+  sourceEntryIds?: string[];
+  sourceCount?: number;
 };
 
 export type Agreement = {
@@ -73,4 +92,32 @@ export type RoomPreview = {
   status: RoomStatus;
   date: Date | null;
   parentRoomId?: string;
+  containerId?: string;
+  kind?: RoomKind;
+};
+
+export type TopicPreview = {
+  code: string;
+  prompt: string;
+  date: Date | null;
+  status: RoomStatus;
+  people: number;
+  cardCount: number;
+  subtopicCount: number;
+  verdict: string;
+  parentRoomId?: string;
+  subtopics: TopicPreview[];
+};
+
+export type SavedRoom = {
+  code: string;
+  name: string;
+  created: Date | null;
+  hostId: string;
+  memberCount: number;
+  topicsDebated: number;
+  verdictsReached: number;
+  weekStreak: number;
+  liveTopic?: TopicPreview;
+  pastTopics: TopicPreview[];
 };

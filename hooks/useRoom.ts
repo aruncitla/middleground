@@ -7,9 +7,11 @@ import {
   subscribeEntries,
   subscribeParticipants,
   subscribeRoom,
+  subscribeSeats,
   subscribeVotes,
+  containerCodeOf,
 } from '@/lib/roomService';
-import type { Agreement, Card, Entry, Participant, Room, Vote } from '@/types/room';
+import type { Agreement, Card, Entry, Participant, Room, Seat, Vote } from '@/types/room';
 
 export function useRoom(code: string | undefined) {
   const [room, setRoom] = useState<Room | null>(null);
@@ -18,6 +20,7 @@ export function useRoom(code: string | undefined) {
   const [cards, setCards] = useState<Card[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
   const [agreements, setAgreements] = useState<Agreement[]>([]);
+  const [seats, setSeats] = useState<Seat[]>([]);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -34,6 +37,16 @@ export function useRoom(code: string | undefined) {
     ];
     return () => unsubs.forEach((u) => u());
   }, [code]);
+
+  const container = room ? containerCodeOf(room) : undefined;
+
+  useEffect(() => {
+    if (!container) {
+      setSeats([]);
+      return;
+    }
+    return subscribeSeats(container, setSeats);
+  }, [container]);
 
   const pastLobby = room?.status === 'swiping' || room?.status === 'summary' || room?.status === 'synthesizing';
 
@@ -64,5 +77,5 @@ export function useRoom(code: string | undefined) {
     void rememberJoinedRoom(uid, code, room).catch(() => {});
   }, [code, room, participants]);
 
-  return { room, participants, entries, cards, votes, agreements, ready, me };
+  return { room, participants, entries, cards, votes, agreements, seats, ready, me };
 }

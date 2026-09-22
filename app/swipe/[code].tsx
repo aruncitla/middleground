@@ -1,38 +1,50 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { Screen } from '@/components/Screen';
+import { SeatGate } from '@/components/SeatGate';
 import { SwipeCard } from '@/components/SwipeCard';
 import { VoteButtons } from '@/components/VoteButtons';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
 import { isGenericFillerText } from '@/lib/cardQuality';
 import { formatVoteDeadline } from '@/lib/formatEnds';
-import { castVote, closeVotingIfOpen, ensureVoteDeadline, markFinishedSwiping } from '@/lib/roomService';
-import { colors, controls, type } from '@/lib/theme';
+import { avatarById, colors, controls, type } from '@/lib/theme';
+import { containerCodeOf, castVote, closeVotingIfOpen, ensureVoteDeadline, markFinishedSwiping, reopenThoughts } from '@/lib/roomService';
+import { voteBelongsToSeat, voterId } from '@/lib/seatsLocal';
+import { mergeVotes, optimisticVote } from '@/lib/voteTally';
+import type { Seat, Vote } from '@/types/room';
 
 export default function SwipeCardScreen() {
   const { code: raw } = useLocalSearchParams<{ code: string }>();
   const code = String(raw ?? '').toUpperCase();
   const router = useRouter();
   const { user, loading: authLoading, error: authError } = useGuestAuth();
-  const { room, participants, cards, votes, ready } = useRoom(code);
+  const { room, participants, entries, cards, votes, seats, ready } = useRoom(code);
+  const container = room ? containerCodeOf(room) : undefined;
+  const [activeSeat, setActiveSeat] = useState<Seat | null>(null);
+  const [localVotes, setLocalVotes] = useState<Vote[]>([]);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
   const endingRef = useRef(false);
 
+  useEffect(() => {
+    setLocalVotes([]);
+  }, [code]);
+
+  const mergedVotes = useMemo(() => mergeVotes(votes, localVotes), [votes, localVotes]);
+
   const myChoiceByCard = useMemo(() => {
     const map = new Map<string, 'agree' | 'disagree'>();
-    if (!user) return map;
-    for (const vote of votes) {
-      if (vote.uid === user.uid) map.set(vote.cardId, vote.choice);
+    for (const vote of mergedVotes) {
+      if (voteBelongsToSeat(vote, activeSeat, user?.uid)) map.set(vote.cardId, vote.choice);
     }
     return map;
-  }, [votes, user]);
+  }, [mergedVotes, activeSeat, user?.uid]);
 
   const visibleCards = useMemo(
     () => cards.filter((c) => !isGenericFillerText(c.text)),
@@ -46,9 +58,16 @@ export default function SwipeCardScreen() {
 
   const top = remaining[0];
   const next = remaining[1];
+  const myEntryIds = useMemo(() => {
+    if (!user) return new Set<string>();
+    return new Set(entries.filter((e) => e.authorId === user.uid).map((e) => e.id));
+  }, [entries, user]);
+  const cardIsMine = (card: (typeof remaining)[0] | undefined) =>
+    Boolean(card?.sourceEntryIds?.some((id) => myEntryIds.has(id)));
   const isHost = Boolean(user && room && user.uid === room.hostId);
-  const votedIds = useMemo(() => new Set(votes.map((v) => v.uid)), [votes]);
-  const allVoted = participants.length > 0 && votedIds.size >= participants.length;
+  const roster = seats.length ? seats : participants;
+  const votedIds = useMemo(() => new Set(mergedVotes.map((v) => voterId(v))), [mergedVotes]);
+  const allVoted = roster.length > 0 && votedIds.size >= roster.length;
   const myVoteCount = myChoiceByCard.size;
   const isLateJoiner = visibleCards.length > 0 && myVoteCount === 0;
 
@@ -87,12 +106,18 @@ export default function SwipeCardScreen() {
     if (votingOpen) router.replace(`/summary/${code}`);
   }, [user, remaining.length, visibleCards.length, code, votingOpen, router]);
 
-  const vote = async (cardId: string, choice: 'agree' | 'disagree') => {
-    if (!user || busy || !votingOpen) return;
+  const vote = async (cardId: string, choice: 'agree' | 'disagree', seatId?: string) => {
+    const sid = seatId || activeSeat?.id;
+    if (!user || !sid || busy || !votingOpen) return;
+    const found = seats.find((s) => s.id === sid);
+    if (found && found.id !== activeSeat?.id) setActiveSeat(found);
+    const next = optimisticVote({ uid: user.uid, seatId: sid, cardId, choice });
+    setLocalVotes((prev) => mergeVotes(prev, [next]));
     setBusy(true);
     try {
-      await castVote(code, user.uid, cardId, choice);
+      await castVote(code, user.uid, cardId, choice, sid);
     } catch (e) {
+      setLocalVotes((prev) => prev.filter((v) => v.id !== next.id));
       Alert.alert('Vote failed', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -107,13 +132,33 @@ export default function SwipeCardScreen() {
     }
   };
 
+  const onReopen = async () => {
+    setBusy(true);
+    try {
+      await reopenThoughts(code);
+    } catch (e) {
+      Alert.alert('Could not reopen', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Screen loading={authLoading || !ready} error={authError}>
+      <SeatGate containerCode={container} topicCode={code} uid={user?.uid} onSeatChange={setActiveSeat}>
+        {(session) => {
+          const avatar = avatarById(session.seat.avatarId);
+          return (
       <View style={styles.page}>
         <View style={styles.header}>
           <BrandMark size="sm" />
           <RoomStageBar stage="vote" />
           <Text style={type.kicker}>Vote</Text>
+          <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
+            <Text style={controls.ghostText}>
+              {avatar.emoji} {session.seat.displayName} · Switch seat
+            </Text>
+          </Pressable>
           <Text style={type.title} numberOfLines={2}>
             {room?.topic}
           </Text>
@@ -129,7 +174,7 @@ export default function SwipeCardScreen() {
               {voteTimedOut ? 'Time’s up — wrapping up votes…' : formatVoteDeadline(voteEnds)}
             </Text>
           ) : null}
-          <ParticipationStats participants={participants} votes={votes} showVotes />
+          <ParticipationStats participants={participants} seats={session.seats} votes={mergedVotes} showVotes />
         </View>
 
         <View style={styles.deck}>
@@ -140,8 +185,8 @@ export default function SwipeCardScreen() {
             </View>
           ) : top ? (
             <>
-              {next ? <SwipeCard card={next} stacked onVote={() => {}} /> : null}
-              <SwipeCard card={top} onVote={(c) => void vote(top.id, c)} />
+              {next ? <SwipeCard card={next} stacked mine={cardIsMine(next)} onVote={() => {}} /> : null}
+              <SwipeCard card={top} mine={cardIsMine(top)} onVote={(c) => void vote(top.id, c, session.seat.id)} />
             </>
           ) : (
             <View style={styles.empty}>
@@ -152,7 +197,20 @@ export default function SwipeCardScreen() {
         </View>
 
         {top && votingOpen ? (
-          <VoteButtons onAgree={() => void vote(top.id, 'agree')} onDisagree={() => void vote(top.id, 'disagree')} />
+          <VoteButtons onAgree={() => void vote(top.id, 'agree', session.seat.id)} onDisagree={() => void vote(top.id, 'disagree', session.seat.id)} />
+        ) : null}
+
+        {mergedVotes.length === 0 && votingOpen ? (
+          <>
+            <Button
+              disabled={busy}
+              variant="secondary"
+              label={busy ? 'Working…' : 'Back to sharing thoughts'}
+              onPress={() => void onReopen()}
+              style={styles.results}
+            />
+            <Text style={[type.footnote, styles.hint]}>No one has voted yet. You can reopen thoughts for everyone.</Text>
+          </>
         ) : null}
 
         {isHost && allVoted && votingOpen && remaining.length > 0 ? (
@@ -164,6 +222,9 @@ export default function SwipeCardScreen() {
           />
         ) : null}
       </View>
+          );
+        }}
+      </SeatGate>
     </Screen>
   );
 }
@@ -172,7 +233,7 @@ const styles = StyleSheet.create({
   page: { flex: 1, paddingTop: 12, paddingBottom: 20, gap: 8 },
   header: { paddingHorizontal: 20, gap: 6 },
   closed: { ...type.footnote, color: colors.accentHover },
-  deck: { flex: 1, minHeight: 280, marginTop: 8 },
+  deck: { flex: 1, minHeight: 280, marginTop: 8, overflow: 'hidden' },
   empty: {
     marginHorizontal: 20,
     ...controls.panel,
@@ -181,4 +242,5 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   results: { marginHorizontal: 20, marginTop: 12 },
+  hint: { marginHorizontal: 20 },
 });

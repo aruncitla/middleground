@@ -134,7 +134,7 @@ export const ConsensusSummaryCard = forwardRef<View, ConsensusSummaryCardProps>(
       >
         <VennField variant="card" />
 
-        <BrandMark size="sm" />
+        <BrandMark size="sm" toHome={false} />
         <Text style={styles.title} numberOfLines={3}>
           {topic}
         </Text>

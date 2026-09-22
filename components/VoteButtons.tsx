@@ -1,4 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
 import { colors, type } from '@/lib/theme';
 
 type Props = {
@@ -8,31 +10,42 @@ type Props = {
   compact?: boolean;
 };
 
+function VoteHit({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const tap = Gesture.Tap().onEnd(() => {
+    runOnJS(onPress)();
+  });
+  return (
+    <GestureDetector gesture={tap}>
+      <View
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        style={[styles.choice, selected && styles.choiceOn]}
+      >
+        <Text style={[styles.label, selected && styles.labelOn]}>{label}</Text>
+      </View>
+    </GestureDetector>
+  );
+}
+
 export function VoteButtons({ onDisagree, onAgree, current, compact }: Props) {
   return (
     <View style={[styles.row, compact && styles.compact]}>
-      <Pressable
-        onPress={onDisagree}
-        style={[styles.choice, current === 'disagree' && styles.choiceOn]}
-        accessibilityRole="button"
-        accessibilityState={{ selected: current === 'disagree' }}
-      >
-        <Text style={[styles.label, current === 'disagree' && styles.labelOn]}>← No</Text>
-      </Pressable>
-      <Pressable
-        onPress={onAgree}
-        style={[styles.choice, current === 'agree' && styles.choiceOn]}
-        accessibilityRole="button"
-        accessibilityState={{ selected: current === 'agree' }}
-      >
-        <Text style={[styles.label, current === 'agree' && styles.labelOn]}>Yes →</Text>
-      </Pressable>
+      <VoteHit label="← No" selected={current === 'disagree'} onPress={onDisagree} />
+      <VoteHit label="Yes →" selected={current === 'agree'} onPress={onAgree} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 12, paddingHorizontal: 20 },
+  row: { flexDirection: 'row', gap: 12, paddingHorizontal: 20, zIndex: 20, elevation: 20 },
   compact: { paddingHorizontal: 0 },
   choice: {
     flex: 1,

@@ -34,7 +34,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number) {
   });
 }
 
-async function capturePng(node: unknown): Promise<File | null> {
+async function capturePng(node: unknown, filename: string): Promise<File | null> {
   if (Platform.OS !== 'web') return null;
   const el = asElement(node);
   if (!el) return null;
@@ -46,7 +46,7 @@ async function capturePng(node: unknown): Promise<File | null> {
     skipFonts: true,
   });
   if (!blob) return null;
-  return new File([blob], 'middleground-consensus.png', { type: 'image/png' });
+  return new File([blob], filename, { type: 'image/png' });
 }
 
 function downloadFile(file: File) {
@@ -62,13 +62,21 @@ export function consensusShareMessage(topic: string) {
   return `We found some overlap on “${topic}” with Middleground.\n${APP_URL}`;
 }
 
-export async function shareConsensusCard(node: unknown, topic: string): Promise<'shared' | 'copied' | 'cancelled'> {
-  const text = consensusShareMessage(topic);
-  const capture = capturePng(node);
+export function roomInviteMessage(name: string, code: string, url: string) {
+  return `Join “${name}” on Middleground. Code ${code}.\n${url}`;
+}
+
+export async function shareCardImage(
+  node: unknown,
+  opts: { text: string; filename: string; url?: string },
+): Promise<'shared' | 'copied' | 'cancelled'> {
+  const text = opts.text;
+  const url = opts.url ?? APP_URL;
+  const capture = capturePng(node, opts.filename);
 
   if (Platform.OS === 'web' && isMobileWeb() && typeof navigator.share === 'function') {
     const file = await withTimeout(capture, 4000);
-    const payload: ShareData = { title: 'Middleground', text, url: APP_URL };
+    const payload: ShareData = { title: 'Middleground', text, url };
     const withFile = Boolean(file && navigator.canShare?.({ files: [file] }));
     try {
       await navigator.share(withFile && file ? { ...payload, files: [file] } : payload);
@@ -80,7 +88,7 @@ export async function shareConsensusCard(node: unknown, topic: string): Promise<
 
   if (Platform.OS !== 'web') {
     try {
-      const result = await Share.share({ title: 'Middleground', message: text, url: APP_URL });
+      const result = await Share.share({ title: 'Middleground', message: text, url });
       if (result.action === Share.dismissedAction) return 'cancelled';
       return 'shared';
     } catch (error) {
@@ -92,4 +100,24 @@ export async function shareConsensusCard(node: unknown, topic: string): Promise<
   const file = await withTimeout(capture, 4000);
   if (file) downloadFile(file);
   return 'copied';
+}
+
+export async function shareConsensusCard(node: unknown, topic: string): Promise<'shared' | 'copied' | 'cancelled'> {
+  return shareCardImage(node, {
+    text: consensusShareMessage(topic),
+    filename: 'middleground-consensus.png',
+  });
+}
+
+export async function shareRoomInviteCard(
+  node: unknown,
+  name: string,
+  code: string,
+  url: string,
+): Promise<'shared' | 'copied' | 'cancelled'> {
+  return shareCardImage(node, {
+    text: roomInviteMessage(name, code, url),
+    filename: 'middleground-invite.png',
+    url,
+  });
 }

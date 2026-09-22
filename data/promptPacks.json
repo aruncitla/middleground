@@ -1,0 +1,146 @@
+[
+  {
+    "id": "friday-debates",
+    "title": "Friday Debates",
+    "emoji": "🔥",
+    "blurb": "The classics. Settle them.",
+    "mode": "debate",
+    "season": null,
+    "prompts": [
+      "Pineapple on pizza: yes or no?",
+      "Is a hot dog a sandwich?",
+      "Mac or PC — pick a side.",
+      "Is cereal a soup?",
+      "Should the toilet paper roll over or under?",
+      "Is a burrito a wrap?",
+      "City life or small town — which actually wins?",
+      "Are spoilers a crime?"
+    ]
+  },
+  {
+    "id": "unpopular-opinions",
+    "title": "Unpopular Opinions",
+    "emoji": "🤐",
+    "blurb": "Say the quiet part. Vote on it.",
+    "mode": "hot-takes",
+    "season": null,
+    "prompts": [
+      "What's an unpopular opinion you actually hold?",
+      "A popular movie everyone overrates.",
+      "A food people love that you would skip.",
+      "A 'life hack' that is quietly terrible.",
+      "Something you would ban for a week, just to see.",
+      "A trend that should have ended last year.",
+      "A hill you will die on about work.",
+      "The overrated holiday. Make your case."
+    ]
+  },
+  {
+    "id": "would-you-rather",
+    "title": "Would You Rather",
+    "emoji": "🌀",
+    "blurb": "Two doors. One group. No peeking.",
+    "mode": "bracket",
+    "season": null,
+    "prompts": [
+      "Always 10 minutes late, or always 2 hours early?",
+      "Speak every language, or talk to animals?",
+      "Live without music, or live without movies?",
+      "Be famous for something embarrassing, or unknown for something great?",
+      "Teleport, or read minds — but only sometimes, and poorly?",
+      "Never use a phone again, or never eat takeout again?",
+      "Infinite money, no free time — or the reverse?",
+      "Know how you die, or know the date, but not the how?"
+    ]
+  },
+  {
+    "id": "road-trip",
+    "title": "Road Trip",
+    "emoji": "🚗",
+    "blurb": "Snacks, seats, and the aux cord.",
+    "mode": "debate",
+    "season": null,
+    "prompts": [
+      "Where should we actually go?",
+      "Who controls the aux — and what's off-limits?",
+      "Driver rotation, or one designated driver?",
+      "Cheap motels, or one nicer stop?",
+      "What snack run is non-negotiable?",
+      "Sunrise start, or leave after lunch?",
+      "Scenic route, or fastest route?",
+      "One big destination, or many small stops?"
+    ]
+  },
+  {
+    "id": "predictions",
+    "title": "Predictions",
+    "emoji": "🏆",
+    "blurb": "Write it down. Check it later.",
+    "mode": "predictions",
+    "season": null,
+    "prompts": [
+      "What will actually happen by the end of this year?",
+      "Which team / show / company will surprise everyone?",
+      "A prediction you want on the record.",
+      "What will be over by next summer?",
+      "Who among us is most likely to… (you fill it in)?",
+      "A price, a score, or a date — make it specific.",
+      "What will people pretend they saw coming?",
+      "The safest bet in the room. Prove it."
+    ]
+  },
+  {
+    "id": "halloween",
+    "title": "Halloween",
+    "emoji": "🎃",
+    "blurb": "Costumes, candy, and cursed plans.",
+    "mode": "debate",
+    "season": { "start": "10-01", "end": "11-01", "label": "Halloween" },
+    "prompts": [
+      "Costume party, haunted house, or movie marathon?",
+      "What's the group costume — if we even do one?",
+      "Candy we actually want vs candy we pretend to want.",
+      "Scariest movie we can agree to watch.",
+      "Trick-or-treat route, or stay in and host?",
+      "Pumpkin carving or pumpkin decorating?",
+      "What's too extra for Halloween this year?",
+      "Best snack for a horror night."
+    ]
+  },
+  {
+    "id": "diwali",
+    "title": "Diwali",
+    "emoji": "🪔",
+    "blurb": "Lights, sweets, and who hosts.",
+    "mode": "debate",
+    "season": { "start": "10-20", "end": "11-10", "label": "Diwali" },
+    "prompts": [
+      "Who hosts, and what does everyone bring?",
+      "Sweets we actually want on the table.",
+      "Lights: homemade, store-bought, or both?",
+      "One new tradition worth trying this year.",
+      "Firecrackers: yes, no, or a tiny maybe?",
+      "Outfit energy: festive, comfy, or extra?",
+      "What should we skip this year without guilt?",
+      "The one dish that means it's Diwali."
+    ]
+  },
+  {
+    "id": "new-year",
+    "title": "New Year",
+    "emoji": "🔮",
+    "blurb": "Resolutions, midnight, and the afterplan.",
+    "mode": "predictions",
+    "season": { "start": "12-26", "end": "01-07", "label": "New Year" },
+    "prompts": [
+      "Stay in, go out, or a little of both?",
+      "What are we actually doing at midnight?",
+      "A resolution the group would keep.",
+      "What should we leave in the old year?",
+      "Best food for New Year's Day.",
+      "Who is in charge of the playlist?",
+      "A prediction for the next twelve months.",
+      "One thing we start together in January."
+    ]
+  }
+]
