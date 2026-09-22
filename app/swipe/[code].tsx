@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { ParticipationStats } from '@/components/ParticipationStats';
@@ -13,11 +13,19 @@ import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
 import { isGenericFillerText } from '@/lib/cardQuality';
 import { formatVoteDeadline } from '@/lib/formatEnds';
+import { notify } from '@/lib/notify';
 import { avatarById, colors, controls, type } from '@/lib/theme';
 import { containerCodeOf, castVote, closeVotingIfOpen, ensureVoteDeadline, markFinishedSwiping, reopenThoughts } from '@/lib/roomService';
-import { voteBelongsToSeat, voterId } from '@/lib/seatsLocal';
-import { mergeVotes, optimisticVote } from '@/lib/voteTally';
-import type { Seat, Vote } from '@/types/room';
+import {
+  allSeatsCompletedDeck,
+  choiceForSeat,
+  mergeVotes,
+  optimisticVote,
+  rosterSeatIds,
+  sortCards,
+  voteKey,
+} from '@/lib/voteTally';
+import type { Card, Vote } from '@/types/room';
 
 export default function SwipeCardScreen() {
   const { code: raw } = useLocalSearchParams<{ code: string }>();
@@ -26,9 +34,9 @@ export default function SwipeCardScreen() {
   const { user, loading: authLoading, error: authError } = useGuestAuth();
   const { room, participants, entries, cards, votes, seats, ready } = useRoom(code);
   const container = room ? containerCodeOf(room) : undefined;
-  const [activeSeat, setActiveSeat] = useState<Seat | null>(null);
+  const [activeSeatId, setActiveSeatId] = useState<string | null>(null);
   const [localVotes, setLocalVotes] = useState<Vote[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [ending, setEnding] = useState(false);
   const [now, setNow] = useState(Date.now());
   const endingRef = useRef(false);
 
@@ -37,37 +45,36 @@ export default function SwipeCardScreen() {
   }, [code]);
 
   const mergedVotes = useMemo(() => mergeVotes(votes, localVotes), [votes, localVotes]);
+  const visibleCards = useMemo(
+    () => sortCards(cards.filter((c) => !isGenericFillerText(c.text))),
+    [cards],
+  );
+  const cardIds = useMemo(() => visibleCards.map((card) => card.id), [visibleCards]);
+  const rosterIds = useMemo(() => rosterSeatIds(seats, participants), [seats, participants]);
 
   const myChoiceByCard = useMemo(() => {
     const map = new Map<string, 'agree' | 'disagree'>();
-    for (const vote of mergedVotes) {
-      if (voteBelongsToSeat(vote, activeSeat, user?.uid)) map.set(vote.cardId, vote.choice);
+    if (!activeSeatId) return map;
+    for (const card of visibleCards) {
+      const choice = choiceForSeat(mergedVotes, activeSeatId, card.id);
+      if (choice) map.set(card.id, choice);
     }
     return map;
-  }, [mergedVotes, activeSeat, user?.uid]);
+  }, [mergedVotes, activeSeatId, visibleCards]);
 
-  const visibleCards = useMemo(
-    () => cards.filter((c) => !isGenericFillerText(c.text)),
-    [cards],
-  );
+  const remainingForActive = useMemo(() => {
+    if (!activeSeatId) return visibleCards;
+    return visibleCards.filter((card) => !choiceForSeat(mergedVotes, activeSeatId, card.id));
+  }, [visibleCards, mergedVotes, activeSeatId]);
 
-  const remaining = useMemo(() => {
-    if (!user) return visibleCards;
-    return visibleCards.filter((c) => !myChoiceByCard.has(c.id));
-  }, [visibleCards, myChoiceByCard, user]);
-
-  const top = remaining[0];
-  const next = remaining[1];
   const myEntryIds = useMemo(() => {
     if (!user) return new Set<string>();
     return new Set(entries.filter((e) => e.authorId === user.uid).map((e) => e.id));
   }, [entries, user]);
-  const cardIsMine = (card: (typeof remaining)[0] | undefined) =>
+  const cardIsMine = (card: Card | undefined) =>
     Boolean(card?.sourceEntryIds?.some((id) => myEntryIds.has(id)));
   const isHost = Boolean(user && room && user.uid === room.hostId);
-  const roster = seats.length ? seats : participants;
-  const votedIds = useMemo(() => new Set(mergedVotes.map((v) => voterId(v))), [mergedVotes]);
-  const allVoted = roster.length > 0 && votedIds.size >= roster.length;
+  const allVoted = allSeatsCompletedDeck(rosterIds, mergedVotes, cardIds);
   const myVoteCount = myChoiceByCard.size;
   const isLateJoiner = visibleCards.length > 0 && myVoteCount === 0;
 
@@ -101,53 +108,63 @@ export default function SwipeCardScreen() {
   }, [user, voteTimedOut, room?.status, code]);
 
   useEffect(() => {
-    if (!user || remaining.length > 0 || visibleCards.length === 0) return;
+    if (!user || !activeSeatId || remainingForActive.length > 0 || visibleCards.length === 0) return;
     void markFinishedSwiping(code, user.uid).catch(() => {});
-    if (votingOpen) router.replace(`/summary/${code}`);
-  }, [user, remaining.length, visibleCards.length, code, votingOpen, router]);
+    if (votingOpen && allVoted) router.replace(`/summary/${code}`);
+  }, [user, activeSeatId, remainingForActive.length, visibleCards.length, code, votingOpen, allVoted, router]);
 
   const vote = async (cardId: string, choice: 'agree' | 'disagree', seatId?: string) => {
-    const sid = seatId || activeSeat?.id;
-    if (!user || !sid || busy || !votingOpen) return;
-    const found = seats.find((s) => s.id === sid);
-    if (found && found.id !== activeSeat?.id) setActiveSeat(found);
-    const next = optimisticVote({ uid: user.uid, seatId: sid, cardId, choice });
-    setLocalVotes((prev) => mergeVotes(prev, [next]));
-    setBusy(true);
+    const sid = seatId;
+    if (!user || !sid || !votingOpen) return;
+    setActiveSeatId(sid);
+    const nextVote = optimisticVote({ uid: user.uid, seatId: sid, cardId, choice });
+    setLocalVotes((prev) => mergeVotes(prev, [nextVote]));
     try {
       await castVote(code, user.uid, cardId, choice, sid);
     } catch (e) {
-      setLocalVotes((prev) => prev.filter((v) => v.id !== next.id));
-      Alert.alert('Vote failed', e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+      setLocalVotes((prev) => prev.filter((v) => voteKey(v) !== voteKey(nextVote)));
+      notify('Vote failed', e instanceof Error ? e.message : String(e));
     }
   };
 
   const toSummary = async () => {
+    if (!allVoted && !voteTimedOut) return;
+    setEnding(true);
     try {
       await closeVotingIfOpen(code);
     } catch (e) {
-      Alert.alert('Could not open results', e instanceof Error ? e.message : String(e));
+      notify('Could not open results', e instanceof Error ? e.message : String(e));
+    } finally {
+      setEnding(false);
     }
   };
 
   const onReopen = async () => {
-    setBusy(true);
+    setEnding(true);
     try {
       await reopenThoughts(code);
     } catch (e) {
-      Alert.alert('Could not reopen', e instanceof Error ? e.message : String(e));
+      notify('Could not reopen', e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setEnding(false);
     }
   };
 
   return (
     <Screen loading={authLoading || !ready} error={authError}>
-      <SeatGate containerCode={container} topicCode={code} uid={user?.uid} onSeatChange={setActiveSeat}>
+      <SeatGate
+        containerCode={container}
+        topicCode={code}
+        uid={user?.uid}
+        onSeatChange={(seat) => setActiveSeatId(seat?.id ?? null)}
+      >
         {(session) => {
           const avatar = avatarById(session.seat.avatarId);
+          const remaining = visibleCards.filter(
+            (card) => !choiceForSeat(mergedVotes, session.seat.id, card.id),
+          );
+          const top = remaining[0];
+          const next = remaining[1];
           return (
       <View style={styles.page}>
         <View style={styles.header}>
@@ -174,7 +191,14 @@ export default function SwipeCardScreen() {
               {voteTimedOut ? 'Time’s up — wrapping up votes…' : formatVoteDeadline(voteEnds)}
             </Text>
           ) : null}
-          <ParticipationStats participants={participants} seats={session.seats} votes={mergedVotes} showVotes />
+          <ParticipationStats
+            participants={participants}
+            seats={session.seats}
+            entries={entries}
+            votes={mergedVotes}
+            cardIds={cardIds}
+            showVotes
+          />
         </View>
 
         <View style={styles.deck}>
@@ -191,7 +215,18 @@ export default function SwipeCardScreen() {
           ) : (
             <View style={styles.empty}>
               <Text style={type.title}>You’re in</Text>
-              <Text style={type.body}>Opening results…</Text>
+              <Text style={type.body}>
+                {allVoted || voteTimedOut
+                  ? 'Opening results…'
+                  : 'This seat is done. Switch seat to keep voting as someone else, or peek at early results.'}
+              </Text>
+              {votingOpen && !allVoted ? (
+                <Button
+                  variant="secondary"
+                  label="See early results"
+                  onPress={() => router.push(`/summary/${code}`)}
+                />
+              ) : null}
             </View>
           )}
         </View>
@@ -203,9 +238,9 @@ export default function SwipeCardScreen() {
         {mergedVotes.length === 0 && votingOpen ? (
           <>
             <Button
-              disabled={busy}
+              disabled={ending}
               variant="secondary"
-              label={busy ? 'Working…' : 'Back to sharing thoughts'}
+              label={ending ? 'Working…' : 'Back to sharing thoughts'}
               onPress={() => void onReopen()}
               style={styles.results}
             />
@@ -213,11 +248,12 @@ export default function SwipeCardScreen() {
           </>
         ) : null}
 
-        {isHost && allVoted && votingOpen && remaining.length > 0 ? (
+        {isHost && allVoted && votingOpen ? (
           <Button
+            disabled={ending}
             onPress={() => void toSummary()}
             variant="secondary"
-            label="End voting"
+            label={ending ? 'Closing…' : 'End voting'}
             style={styles.results}
           />
         ) : null}

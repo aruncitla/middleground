@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
+import { loadLocalHistory, localHistoryCodes, stubSavedRoom } from '@/lib/historyLocal';
 import { loadSavedRoom, subscribeMyRoomCodes } from '@/lib/roomService';
 import type { SavedRoom } from '@/types/room';
+
+function mergeCodes(server: string[], extra: string[] = []) {
+  return [...new Set([...server, ...extra, ...localHistoryCodes()])];
+}
 
 async function loadRooms(codes: string[]) {
   const unique = [...new Set(codes)];
@@ -18,6 +23,10 @@ async function loadRooms(codes: string[]) {
   ).filter((row): row is SavedRoom => Boolean(row));
   const byCode = new Map<string, SavedRoom>();
   for (const row of loaded) byCode.set(row.code, row);
+  for (const row of loadLocalHistory()) {
+    if (!unique.includes(row.code) || byCode.has(row.code)) continue;
+    byCode.set(row.code, stubSavedRoom(row));
+  }
   return [...byCode.values()].sort(
     (a, b) => (b.created?.getTime() ?? 0) - (a.created?.getTime() ?? 0),
   );
@@ -25,49 +34,58 @@ async function loadRooms(codes: string[]) {
 
 export function useSavedRooms(uid: string | undefined) {
   const [rooms, setRooms] = useState<SavedRoom[]>([]);
-  const [loading, setLoading] = useState(Boolean(uid));
-  const [codes, setCodes] = useState<string[]>([]);
-  const [codesReady, setCodesReady] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [codes, setCodes] = useState<string[]>(() => localHistoryCodes());
+  const [codesReady, setCodesReady] = useState(() => localHistoryCodes().length > 0);
 
   useEffect(() => {
     if (!uid) {
-      setRooms([]);
-      setCodes([]);
-      setCodesReady(false);
+      setCodes((prev) => mergeCodes(prev));
+      setCodesReady(true);
+      return;
+    }
+    return subscribeMyRoomCodes(
+      uid,
+      (next) => {
+        setCodes(mergeCodes(next));
+        setCodesReady(true);
+      },
+      () => {
+        setCodes((prev) => mergeCodes(prev));
+        setCodesReady(true);
+      },
+    );
+  }, [uid]);
+
+  const refresh = useCallback(async (nextCodes: string[]) => {
+    if (!nextCodes.length) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    setCodesReady(false);
-    return subscribeMyRoomCodes(uid, (next) => {
-      setCodes(next);
-      setCodesReady(true);
-    });
-  }, [uid]);
-
-  const refresh = useCallback(async (nextCodes: string[]) => {
-    if (!uid) return;
-    setLoading(true);
     try {
       const rows = await loadRooms(nextCodes);
-      setRooms(rows);
+      setRooms((prev) => {
+        if (rows.length > 0) return rows;
+        return prev;
+      });
     } catch {
-      setRooms([]);
+      setRooms((prev) => prev);
     } finally {
       setLoading(false);
     }
-  }, [uid]);
+  }, []);
 
   useEffect(() => {
-    if (!uid || !codesReady) return;
+    if (!codesReady) return;
     void refresh(codes);
-  }, [uid, codes, codesReady, refresh]);
+  }, [codes, codesReady, refresh]);
 
   useFocusEffect(
     useCallback(() => {
-      if (!uid || !codesReady) return;
+      if (!codesReady) return;
       void refresh(codes);
-    }, [uid, codes, codesReady, refresh]),
+    }, [codes, codesReady, refresh]),
   );
 
   return { rooms, loading, refresh: () => refresh(codes) };

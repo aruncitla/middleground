@@ -18,7 +18,8 @@ const legacy: Vote = { id: 'u2_c1', uid: 'u2', cardId: 'c1', choice: 'agree' };
 
 assert(voterId(voteA) === 's1' && voterId(voteB) === 's2', 'two seats on one browser are two voters');
 assert(new Set([voterId(voteA), voterId(voteB)]).size === 2, 'tallies count both seats');
-assert(voteBelongsToSeat(voteA, arun, 'u1') && !voteBelongsToSeat(voteB, arun, 'u1'), 'active seat only sees its votes');
-assert(voteBelongsToSeat(legacy, guest, 'u2'), 'grandfathered uid seats still own old votes');
+assert(voteBelongsToSeat(voteA, arun) && !voteBelongsToSeat(voteB, arun), 'active seat only sees its votes');
+assert(voteBelongsToSeat(legacy, guest), 'grandfathered uid seats still own old votes');
+assert(!voteBelongsToSeat(voteA, { ...arun, id: 's9', displayName: 'Arun', avatarId: 'hat' }), 'same name+emoji is not the same seat');
 
 console.log('seat tests ok');

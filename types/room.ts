@@ -37,6 +37,7 @@ export type Entry = {
   id: string;
   authorId: string;
   text: string;
+  seatId?: string;
 };
 
 export type CardKind = 'synthesized' | 'blindspot';
@@ -48,6 +49,7 @@ export type Card = {
   order: number;
   agreeCount: number;
   disagreeCount: number;
+  createdAt?: Date | null;
   sourceEntryIds?: string[];
   sourceCount?: number;
 };
@@ -120,4 +122,6 @@ export type SavedRoom = {
   weekStreak: number;
   liveTopic?: TopicPreview;
   pastTopics: TopicPreview[];
+  /** True when this row is a local placeholder waiting on a real Firestore load. */
+  pending?: boolean;
 };

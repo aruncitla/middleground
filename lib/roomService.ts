@@ -9,8 +9,6 @@
   getDocsFromServer,
   increment,
   onSnapshot,
-  orderBy,
-  query,
   runTransaction,
   serverTimestamp,
   setDoc,
@@ -19,7 +17,9 @@
   type Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
+import { entryBelongsToSeat } from '@/lib/entries';
 import { getDb } from '@/lib/firebase';
+import { rememberLocalRoom } from '@/lib/historyLocal';
 import { matchSeat, rememberSeat } from '@/lib/seatsLocal';
 import { topicIsArchived, topicIsLive, verdictLine, weekStreak } from '@/lib/verdict';
 import type {
@@ -249,8 +249,7 @@ export async function createSeat(
     }
     throw new SeatTakenError(match);
   }
-  const mine = seats.filter((s) => s.id === uid || s.claimerUids.includes(uid));
-  const seatId = opts?.id || (!opts?.forceNew && mine.length === 0 ? uid : randomSeatId());
+  const seatId = opts?.id || randomSeatId();
   await setDoc(doc(getDb(), 'rooms', containerCode, 'seats', seatId), {
     displayName: name,
     avatarId: avatar,
@@ -371,25 +370,41 @@ export async function closeThoughts(code: string, uid: string, reason: CloseReas
   });
 }
 
-export async function submitEntry(code: string, uid: string, text: string) {
+export async function submitEntry(code: string, uid: string, text: string, seatId?: string) {
   const trimmed = text.trim().slice(0, 280);
   if (!trimmed) throw new Error('Write something first');
   const db = getDb();
   const rRef = roomRef(code);
   const pRef = doc(db, 'rooms', code, 'participants', uid);
+  const roomSnap = await getDoc(rRef);
+  if (!roomSnap.exists()) throw new Error('Room not found');
+  const room = roomSnap.data() as Room;
+  if (room.status !== 'lobby') throw new Error('Submissions are closed');
+  const limit = typeof room.entryLimit === 'number' ? room.entryLimit : DEFAULT_ENTRY_LIMIT;
+  const existing = await getDocs(collection(db, 'rooms', code, 'entries'));
+  const used = existing.docs.filter((d) => {
+    const data = d.data() as Entry;
+    if (seatId) return entryBelongsToSeat(data, { id: seatId });
+    return data.authorId === uid && !data.seatId;
+  }).length;
+  if (used >= limit) throw new Error('Entry limit reached');
   await runTransaction(db, async (tx) => {
-    const roomSnap = await tx.get(rRef);
+    const latest = await tx.get(rRef);
     const pSnap = await tx.get(pRef);
-    if (!roomSnap.exists()) throw new Error('Room not found');
+    if (!latest.exists()) throw new Error('Room not found');
     if (!pSnap.exists()) throw new Error('Join the room first');
-    const room = roomSnap.data() as Room;
+    if ((latest.data() as Room).status !== 'lobby') throw new Error('Submissions are closed');
     const participant = pSnap.data() as Participant;
-    if (room.status !== 'lobby') throw new Error('Submissions are closed');
-    const limit = typeof room.entryLimit === 'number' ? room.entryLimit : DEFAULT_ENTRY_LIMIT;
-    if (participant.entryCount >= limit) throw new Error('Entry limit reached');
     const entryRef = doc(collection(db, 'rooms', code, 'entries'));
-    tx.set(entryRef, { authorId: uid, text: trimmed, createdAt: serverTimestamp() });
-    tx.update(pRef, { entryCount: increment(1) });
+    tx.set(entryRef, {
+      authorId: uid,
+      text: trimmed,
+      createdAt: serverTimestamp(),
+      ...(seatId ? { seatId } : {}),
+    });
+    if (participant.entryCount < 10) {
+      tx.update(pRef, { entryCount: increment(1) });
+    }
   });
 }
 
@@ -595,16 +610,43 @@ export function subscribeEntries(code: string, cb: (rows: Entry[]) => void): Uns
   });
 }
 
+function mapCard(id: string, data: Record<string, unknown>): Card {
+  const sourceEntryIds = Array.isArray(data.sourceEntryIds)
+    ? data.sourceEntryIds.filter((item): item is string => typeof item === 'string')
+    : undefined;
+  return {
+    id,
+    text: String(data.text ?? ''),
+    kind: data.kind === 'blindspot' ? 'blindspot' : 'synthesized',
+    order: typeof data.order === 'number' ? data.order : 0,
+    agreeCount: typeof data.agreeCount === 'number' ? data.agreeCount : 0,
+    disagreeCount: typeof data.disagreeCount === 'number' ? data.disagreeCount : 0,
+    createdAt: toDate(data.createdAt),
+    sourceEntryIds,
+    sourceCount: typeof data.sourceCount === 'number' ? data.sourceCount : sourceEntryIds?.length,
+  };
+}
+
+function mapVote(id: string, data: Record<string, unknown>): Vote {
+  const seatId = typeof data.seatId === 'string' && data.seatId ? data.seatId : undefined;
+  return {
+    id,
+    uid: String(data.uid ?? ''),
+    cardId: String(data.cardId ?? ''),
+    choice: data.choice === 'disagree' ? 'disagree' : 'agree',
+    seatId,
+  };
+}
+
 export function subscribeCards(code: string, cb: (rows: Card[]) => void): Unsubscribe {
-  const q = query(collection(getDb(), 'rooms', code, 'cards'), orderBy('order', 'asc'));
-  return onSnapshot(q, (snap) => {
-    cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Card)));
+  return onSnapshot(collection(getDb(), 'rooms', code, 'cards'), (snap) => {
+    cb(snap.docs.map((d) => mapCard(d.id, d.data() as Record<string, unknown>)));
   });
 }
 
 export function subscribeVotes(code: string, cb: (rows: Vote[]) => void): Unsubscribe {
   return onSnapshot(collection(getDb(), 'rooms', code, 'votes'), (snap) => {
-    cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Vote)));
+    cb(snap.docs.map((d) => mapVote(d.id, d.data() as Record<string, unknown>)));
   });
 }
 
@@ -624,40 +666,63 @@ function toDate(value: unknown): Date | null {
 
 export async function rememberJoinedRoom(uid: string, code: string, room: Room) {
   const containerId = containerCodeOf(room);
-  const historyRef = doc(getDb(), 'users', uid, 'middlegroundRooms', containerId);
-  const existing = await getDoc(historyRef);
-  await setDoc(
-    historyRef,
-    {
-      topic: (room.name || room.topic).slice(0, 280),
-      containerId,
-      ...(room.parentRoomId ? { parentRoomId: room.parentRoomId } : {}),
-      ...(existing.exists() ? {} : { joinedAt: serverTimestamp() }),
-      lastSeenAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-  if (containerId !== code) {
-    const childRef = doc(getDb(), 'users', uid, 'middlegroundRooms', code);
-    const childExisting = await getDoc(childRef);
+  rememberLocalRoom(containerId, room.name || room.topic || containerId);
+  try {
+    const historyRef = doc(getDb(), 'users', uid, 'middlegroundRooms', containerId);
+    const existing = await getDoc(historyRef);
     await setDoc(
-      childRef,
+      historyRef,
       {
-        topic: room.topic.slice(0, 280),
+        topic: (room.name || room.topic).slice(0, 280),
         containerId,
         ...(room.parentRoomId ? { parentRoomId: room.parentRoomId } : {}),
-        ...(childExisting.exists() ? {} : { joinedAt: serverTimestamp() }),
+        ...(existing.exists() ? {} : { joinedAt: serverTimestamp() }),
         lastSeenAt: serverTimestamp(),
       },
       { merge: true },
     );
+    if (containerId !== code) {
+      const childRef = doc(getDb(), 'users', uid, 'middlegroundRooms', code);
+      const childExisting = await getDoc(childRef);
+      await setDoc(
+        childRef,
+        {
+          topic: room.topic.slice(0, 280),
+          containerId,
+          ...(room.parentRoomId ? { parentRoomId: room.parentRoomId } : {}),
+          ...(childExisting.exists() ? {} : { joinedAt: serverTimestamp() }),
+          lastSeenAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+  } catch {
+    /* local history is enough if the server write is denied */
   }
 }
 
-export function subscribeMyRoomCodes(uid: string, cb: (codes: string[]) => void): Unsubscribe {
-  return onSnapshot(collection(getDb(), 'users', uid, 'middlegroundRooms'), (snap) => {
-    cb(snap.docs.map((d) => d.id));
-  });
+export function subscribeMyRoomCodes(
+  uid: string,
+  cb: (codes: string[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    collection(getDb(), 'users', uid, 'middlegroundRooms'),
+    (snap) => {
+      const codes = [
+        ...new Set(
+          snap.docs.map((d) => {
+            const container = String(d.data()?.containerId || d.id).trim().toUpperCase();
+            return container.length === 6 ? container : d.id;
+          }),
+        ),
+      ];
+      cb(codes);
+    },
+    (error) => {
+      onError?.(error);
+    },
+  );
 }
 
 async function collectionDocs(...path: [string, ...string[]]) {
@@ -730,6 +795,8 @@ export async function loadTopicCodes(containerCode: string): Promise<string[]> {
 
 async function roomSnap(code: string) {
   try {
+    const cached = await getDoc(roomRef(code));
+    if (cached.exists()) return cached;
     return await getDocFromServer(roomRef(code));
   } catch {
     return await getDoc(roomRef(code));

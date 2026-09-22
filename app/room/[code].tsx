@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { RoomInviteCard } from '@/components/RoomInviteCard';
@@ -9,6 +9,7 @@ import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { roomShareUrl } from '@/lib/app';
+import { notify } from '@/lib/notify';
 import { avatarById } from '@/lib/theme';
 import { pathForRoom } from '@/lib/roomPath';
 import { loadSavedRoom, renameRoom } from '@/lib/roomService';
@@ -83,10 +84,10 @@ export default function RoomHomeScreen() {
       await new Promise((resolve) => setTimeout(resolve, 80));
       const result = await shareRoomInviteCard(inviteRef.current, saved.name, saved.code, shareUrl);
       if (result === 'copied') {
-        Alert.alert('Invite ready', 'Link copied. If an image downloaded, attach it in WhatsApp or any chat.');
+        notify('Invite ready', 'Link copied. If an image downloaded, attach it in WhatsApp or any chat.');
       }
     } catch (e) {
-      Alert.alert('Could not share', e instanceof Error ? e.message : String(e));
+      notify('Could not share', e instanceof Error ? e.message : String(e));
     } finally {
       setSharing(false);
     }
@@ -105,7 +106,7 @@ export default function RoomHomeScreen() {
       setSaved(next);
       setNameDraft(next?.name ?? nameDraft);
     } catch (e) {
-      Alert.alert('Could not rename', e instanceof Error ? e.message : String(e));
+      notify('Could not rename', e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -125,7 +126,7 @@ export default function RoomHomeScreen() {
         {(session) => {
           const avatar = avatarById(session.seat.avatarId);
           return (
-            <ScrollView contentContainerStyle={styles.page}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
               <BrandMark />
               <Pressable onPress={() => router.replace('/')} accessibilityRole="button">
                 <Text style={controls.ghostText}>All rooms</Text>

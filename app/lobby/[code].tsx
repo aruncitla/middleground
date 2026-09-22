@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { ParticipantCluster } from '@/components/ParticipantCluster';
@@ -12,6 +12,8 @@ import { SeatGate } from '@/components/SeatGate';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
 import { callSynthesizeRoom, mockSynthesize } from '@/lib/aiSynthesis';
+import { seatEntryCount } from '@/lib/entries';
+import { notify } from '@/lib/notify';
 import { avatarById, colors, controls, type } from '@/lib/theme';
 import { closeThoughts, containerCodeOf, reopenThoughts, submitEntry, writeSynthesizedCards } from '@/lib/roomService';
 import { formatEndedAt, formatEndsAt } from '@/lib/formatEnds';
@@ -37,8 +39,6 @@ export default function LobbyScreen() {
   const [now, setNow] = useState(Date.now());
   const closingRef = useRef(false);
 
-  const me = participants.find((p) => p.id === user?.uid);
-  const remaining = Math.max(0, (room?.entryLimit ?? 10) - (me?.entryCount ?? 0));
   const msLeft = room?.closesAt ? room.closesAt.getTime() - now : null;
   const timedOut = msLeft != null && msLeft <= 0;
 
@@ -67,7 +67,7 @@ export default function LobbyScreen() {
         await writeSynthesizedCards(code, mockSynthesize(entries, room.topic));
       }
     } catch (e) {
-      Alert.alert('Could not close', e instanceof Error ? e.message : String(e));
+      notify('Could not close', e instanceof Error ? e.message : String(e));
       closingRef.current = false;
     } finally {
       setBusy(false);
@@ -93,20 +93,20 @@ export default function LobbyScreen() {
     try {
       await reopenThoughts(code);
     } catch (e) {
-      Alert.alert('Could not reopen', e instanceof Error ? e.message : String(e));
+      notify('Could not reopen', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
 
-  const onSubmit = async () => {
+  const onSubmit = async (seatId: string) => {
     if (!user) return;
     setBusy(true);
     try {
-      await submitEntry(code, user.uid, draft);
+      await submitEntry(code, user.uid, draft, seatId);
       setDraft('');
     } catch (e) {
-      Alert.alert('Could not submit', e instanceof Error ? e.message : String(e));
+      notify('Could not submit', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -118,6 +118,7 @@ export default function LobbyScreen() {
         {(session) => {
           const memberCount = session.seats.length || participants.length || seats.length;
           const avatar = avatarById(session.seat.avatarId);
+          const remaining = Math.max(0, (room?.entryLimit ?? 10) - seatEntryCount(entries, session.seat));
           return (
       <View style={styles.page}>
         <BrandMark size="sm" />
@@ -146,7 +147,7 @@ export default function LobbyScreen() {
         <Text style={type.body}>
           {memberCount} in the room · {entries.length} thoughts · 10 each
         </Text>
-        <ParticipationStats participants={participants} seats={session.seats} />
+        <ParticipationStats participants={participants} seats={session.seats} entries={entries} />
         {room?.status === 'lobby' && room.closesAt ? (
           <Text style={timedOut ? styles.closed : type.body}>
             {timedOut
@@ -156,7 +157,7 @@ export default function LobbyScreen() {
               : `${formatEndsAt(room.closesAt)} · anyone can close thoughts for everyone sooner`}
           </Text>
         ) : null}
-        <ParticipantCluster participants={participants} seats={session.seats} />
+        <ParticipantCluster participants={participants} seats={session.seats} entries={entries} />
 
         {room?.status === 'synthesizing' ? (
           <>
@@ -183,7 +184,7 @@ export default function LobbyScreen() {
               style={[controls.input, styles.area]}
               multiline
             />
-            <Button disabled={busy || remaining <= 0 || room?.status !== 'lobby'} onPress={onSubmit} label="Submit" />
+            <Button disabled={busy || remaining <= 0 || room?.status !== 'lobby'} onPress={() => void onSubmit(session.seat.id)} label="Submit" />
           </>
         )}
 

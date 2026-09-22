@@ -55,8 +55,8 @@ export function voterId(vote: Pick<Vote, 'uid' | 'seatId'>) {
   return vote.seatId || vote.uid;
 }
 
-export function voteBelongsToSeat(vote: Vote, seat: Seat | null, uid?: string) {
+export function voteBelongsToSeat(vote: Vote, seat: Seat | null) {
   if (!seat) return false;
   if (vote.seatId) return vote.seatId === seat.id;
-  return Boolean(uid) && vote.uid === uid && seat.id === uid;
+  return vote.uid === seat.id;
 }

@@ -16,6 +16,10 @@ export function useGuestAuth() {
       return;
     }
     const auth = getFirebaseAuth();
+    if (auth.currentUser) {
+      setUser(auth.currentUser);
+      setLoading(false);
+    }
     const unsub = onAuthStateChanged(auth, (next) => {
       setUser(next);
       if (next) {

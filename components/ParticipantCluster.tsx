@@ -1,20 +1,23 @@
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { AvatarBadge } from '@/components/AvatarBadge';
-import type { Participant, Seat } from '@/types/room';
+import { seatEntryCount } from '@/lib/entries';
+import type { Entry, Participant, Seat } from '@/types/room';
 
 export function ParticipantCluster({
   participants,
   seats,
+  entries = [],
 }: {
   participants: Participant[];
   seats?: Seat[];
+  entries?: Entry[];
 }) {
   const rows = seats?.length
     ? seats.map((s) => ({
         id: s.id,
         displayName: s.displayName,
         avatarId: s.avatarId,
-        entryCount: undefined as number | undefined,
+        entryCount: seatEntryCount(entries, s),
       }))
     : participants.map((p) => ({
         id: p.id,

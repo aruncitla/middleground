@@ -1,12 +1,15 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { voterId } from '@/lib/seatsLocal';
+import { seatsThatShared } from '@/lib/entries';
+import { rosterSeatIds, seatsStartedCount } from '@/lib/voteTally';
 import { colors, type } from '@/lib/theme';
-import type { Participant, Seat, Vote } from '@/types/room';
+import type { Entry, Participant, Seat, Vote } from '@/types/room';
 
 type Props = {
   participants: Participant[];
   seats?: Seat[];
+  entries?: Entry[];
   votes?: Vote[];
+  cardIds?: string[];
   showVotes?: boolean;
 };
 
@@ -19,10 +22,20 @@ function Bar({ value, total }: { value: number; total: number }) {
   );
 }
 
-export function ParticipationStats({ participants, seats, votes = [], showVotes = false }: Props) {
-  const total = seats?.length || participants.length;
-  const shared = participants.filter((p) => (p.entryCount ?? 0) > 0).length;
-  const voted = new Set(votes.map((v) => voterId(v))).size;
+export function ParticipationStats({
+  participants,
+  seats,
+  entries = [],
+  votes = [],
+  cardIds = [],
+  showVotes = false,
+}: Props) {
+  const roster = seats?.length ? seats : participants;
+  const total = roster.length;
+  const shared = seats?.length
+    ? seatsThatShared(seats, entries)
+    : participants.filter((p) => (p.entryCount ?? 0) > 0).length;
+  const voted = seatsStartedCount(rosterSeatIds(seats ?? [], participants), votes, cardIds);
   if (total === 0) return null;
 
   const waitingShare = Math.max(0, total - shared);

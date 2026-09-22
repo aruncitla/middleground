@@ -1,5 +1,11 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  getAuth,
+  indexedDBLocalPersistence,
+  initializeAuth,
+  type Auth,
+} from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import { getFunctions, type Functions } from 'firebase/functions';
 
@@ -41,8 +47,19 @@ export function getDb(): Firestore {
   return getFirestore(getFirebaseApp());
 }
 
+let auth: Auth | undefined;
+
 export function getFirebaseAuth(): Auth {
-  return getAuth(getFirebaseApp());
+  if (auth) return auth;
+  const app = getFirebaseApp();
+  try {
+    auth = initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+    });
+  } catch {
+    auth = getAuth(app);
+  }
+  return auth;
 }
 
 export function getFirebaseFunctions(): Functions {

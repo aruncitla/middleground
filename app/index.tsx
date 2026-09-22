@@ -2,7 +2,6 @@ import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import { Button } from '@/components/Button';
 import { Screen } from '@/components/Screen';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useSavedRooms } from '@/hooks/usePastRooms';
+import { notify } from '@/lib/notify';
 import { peekRoom } from '@/lib/roomService';
 import { pathForRoom } from '@/lib/roomPath';
 import { colors, controls, type } from '@/lib/theme';
@@ -26,6 +26,7 @@ function formatDate(date: Date | null) {
 }
 
 function previewLine(row: SavedRoom) {
+  if (row.pending) return 'Loading room…';
   const live = row.liveTopic ? ' · live topic' : '';
   return `${row.topicsDebated} topics · ${row.verdictsReached} verdicts · ${row.memberCount} members${live}`;
 }
@@ -33,12 +34,15 @@ function previewLine(row: SavedRoom) {
 export default function HomeScreen() {
   const router = useRouter();
   const { user, loading, error } = useGuestAuth();
-  const { rooms: savedRooms } = useSavedRooms(user?.uid);
+  const { rooms: savedRooms, loading: roomsLoading } = useSavedRooms(user?.uid);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
 
   const onJoin = async () => {
-    if (!user) return;
+    if (!user) {
+      notify('Still signing you in', 'Try again in a moment.');
+      return;
+    }
     setBusy(true);
     try {
       const room = await peekRoom(code);
@@ -47,7 +51,7 @@ export default function HomeScreen() {
       if (isGroup) router.push(`/room/${room.id}`);
       else router.replace(pathForRoom(room.id, room.status));
     } catch (e) {
-      Alert.alert('Join failed', e instanceof Error ? e.message : String(e));
+      notify('Join failed', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -55,7 +59,7 @@ export default function HomeScreen() {
 
   return (
     <Screen loading={loading} error={error}>
-      <ScrollView contentContainerStyle={styles.page}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
         <BrandMark />
         <View style={styles.script}>
           <Text style={styles.scriptLine}>Share your thoughts.</Text>
@@ -95,7 +99,9 @@ export default function HomeScreen() {
         <View style={controls.panel}>
           <Text style={type.section}>Saved rooms</Text>
           {savedRooms.length === 0 ? (
-            <Text style={type.footnote}>Rooms you join will land here.</Text>
+            <Text style={type.footnote}>
+              {roomsLoading ? 'Loading rooms…' : 'Rooms you join will land here.'}
+            </Text>
           ) : (
             savedRooms.map((row) => (
               <Pressable

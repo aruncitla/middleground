@@ -1,13 +1,14 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { PromptPacks } from '@/components/PromptPacks';
 import { Screen } from '@/components/Screen';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
+import { notify } from '@/lib/notify';
 import { loadProfile, saveProfile } from '@/lib/profileLocal';
-import { CLOSE_WINDOWS, createRoom, createSeat, createTopicInRoom, joinRoom, isSeatTakenError } from '@/lib/roomService';
+import { CLOSE_WINDOWS, createRoom, createSeat, createTopicInRoom, joinRoom, isSeatTakenError, peekRoom, rememberJoinedRoom } from '@/lib/roomService';
 import type { TopicMode } from '@/lib/promptPacks';
 import { colors, controls, type } from '@/lib/theme';
 import type { CloseWindowId } from '@/types/room';
@@ -25,27 +26,42 @@ export default function NewTopicScreen() {
   const container = String(rawRoom ?? '').toUpperCase();
   const inRoom = container.length === 6;
   const { user, loading, error } = useGuestAuth();
-  const stored = loadProfile();
   const [topic, setTopic] = useState('');
-  const [name, setName] = useState(stored.name);
+  const [name, setName] = useState('');
   const [roomName, setRoomName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [closeWindow, setCloseWindow] = useState<CloseWindowId>('1h');
   const [mode, setMode] = useState<TopicMode>('debate');
 
+  useEffect(() => {
+    const stored = loadProfile();
+    setName((current) => current.trim() || stored.name);
+  }, []);
+
   const start = async (prompt: string, nextMode: TopicMode) => {
-    if (!user) return;
     const text = prompt.trim();
-    if (!text) return;
-    if (!inRoom && !roomName.trim()) {
-      Alert.alert('Name the room', 'Give the group a name. The topic stays the question you’re asking.');
+    const storedProfile = loadProfile();
+    const seatName = (name.trim() || storedProfile.name).trim();
+    if (!user) {
+      setFormError('Still signing you in. Try again in a moment.');
       return;
     }
+    if (!seatName) {
+      setFormError('Type a display name first.');
+      return;
+    }
+    if (!text) {
+      setFormError('Pick a prompt or write your own topic.');
+      return;
+    }
+    if (!inRoom && !roomName.trim()) {
+      setFormError('Give the group a room name. The topic stays the question you’re asking.');
+      return;
+    }
+    setFormError(null);
     setBusy(true);
     try {
-      const storedProfile = loadProfile();
-      const seatName = name.trim() || storedProfile.name;
-      if (!seatName) throw new Error('Pick a display name first');
       const avatarId = storedProfile.avatarId || 'fox';
       saveProfile({ name: seatName, avatarId });
       const code = inRoom
@@ -63,9 +79,13 @@ export default function NewTopicScreen() {
         if (!isSeatTakenError(e)) throw e;
       }
       if (inRoom) await joinRoom(container, user.uid, seatName, avatarId).catch(() => {});
+      const created = await peekRoom(inRoom ? container : code);
+      if (created) await rememberJoinedRoom(user.uid, created.id, created).catch(() => {});
       router.replace(`/lobby/${code}`);
     } catch (e) {
-      Alert.alert('Could not start', e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setFormError(message);
+      notify('Could not start', message);
     } finally {
       setBusy(false);
     }
@@ -73,7 +93,7 @@ export default function NewTopicScreen() {
 
   return (
     <Screen loading={loading} error={error}>
-      <ScrollView contentContainerStyle={styles.page}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
         <BrandMark />
         <Pressable onPress={() => router.back()} accessibilityRole="button">
           <Text style={controls.ghostText}>{inRoom ? `Back to ${container}` : 'Back'}</Text>
@@ -85,11 +105,17 @@ export default function NewTopicScreen() {
             : 'Tap a prompt to start. Or write your own.'}
         </Text>
 
+        {formError ? <Text style={styles.error}>{formError}</Text> : null}
+
         <Text style={[type.label, styles.label]}>Your name</Text>
         <TextInput
           value={name}
-          onChangeText={setName}
-          placeholder="Ada"
+          onChangeText={(value) => {
+            setName(value);
+            if (formError) setFormError(null);
+          }}
+          placeholder="Your name"
+          autoComplete="name"
           placeholderTextColor={colors.faint}
           style={controls.input}
         />
@@ -99,7 +125,10 @@ export default function NewTopicScreen() {
             <Text style={[type.label, styles.label]}>Room name</Text>
             <TextInput
               value={roomName}
-              onChangeText={setRoomName}
+              onChangeText={(value) => {
+                setRoomName(value);
+                if (formError) setFormError(null);
+              }}
               placeholder="Friday crew"
               placeholderTextColor={colors.faint}
               style={controls.input}
@@ -164,6 +193,7 @@ export default function NewTopicScreen() {
 const styles = StyleSheet.create({
   page: { padding: 22, paddingBottom: 48, gap: 10 },
   label: { marginTop: 4 },
+  error: { ...type.body, color: colors.danger },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingVertical: 8,

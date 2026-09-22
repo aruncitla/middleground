@@ -161,6 +161,12 @@ export function SeatPicker({
   const [name, setName] = useState(initialName || stored.name);
   const [avatarId, setAvatarId] = useState<AvatarId>(initialAvatarId || stored.avatarId);
 
+  useEffect(() => {
+    const next = loadProfile();
+    setName((current) => current.trim() || initialName || next.name);
+    setAvatarId((current) => initialAvatarId || current || next.avatarId);
+  }, [initialName, initialAvatarId]);
+
   return (
     <View style={styles.panel}>
       <Text style={type.section}>{title}</Text>
@@ -169,7 +175,8 @@ export function SeatPicker({
       <TextInput
         value={name}
         onChangeText={setName}
-        placeholder="Ada"
+        placeholder="Your name"
+        autoComplete="name"
         placeholderTextColor={colors.faint}
         style={controls.input}
       />
@@ -302,16 +309,14 @@ export function SeatGate({
   }, [session.active?.id, session.active?.displayName, session.active?.avatarId, uid, containerCode, topicCode]);
 
   const submitClaim = async (draft: Draft, forceNew: boolean) => {
-    if (!containerCode || !uid) return;
+    if (!containerCode || !uid) {
+      setError('Still signing you in. Try again in a moment.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const existing = matchSeat(session.seats, draft.name, draft.avatarId);
-      if (existing && session.mySeats.some((s) => s.id === existing.id) && !forceNew) {
-        session.activate(existing.id);
-        session.setSwitching(false);
-        return;
-      }
       if (existing && !forceNew) {
         setPending(existing);
         return;
@@ -337,6 +342,7 @@ export function SeatGate({
     setError(null);
     try {
       await claimExistingSeat(containerCode, topicCode, uid, pending);
+      session.activate(pending.id);
       setPending(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
