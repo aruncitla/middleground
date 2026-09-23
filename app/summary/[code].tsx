@@ -132,10 +132,20 @@ export default function SummaryScreen() {
     return rows;
   }, [agreements, code, grouped.everyone, isFollowUp]);
 
+  const leftoverForActive = useMemo(() => {
+    if (!activeSeatId) return 0;
+    return cardIds.filter((id) => !choiceForSeat(mergedVotes, activeSeatId, id)).length;
+  }, [cardIds, mergedVotes, activeSeatId]);
+
   useEffect(() => {
     if (!room) return;
     if (room.status === 'lobby' || room.status === 'synthesizing') router.replace(`/lobby/${code}`);
   }, [room, code, router]);
+
+  useEffect(() => {
+    if (!votingOpen || !activeSeatId || cardIds.length === 0) return;
+    if (leftoverForActive > 0) router.replace(`/swipe/${code}`);
+  }, [votingOpen, activeSeatId, leftoverForActive, cardIds.length, code, router]);
 
   useEffect(() => {
     if (room?.status !== 'swiping' || !room.votesCloseAt) return;

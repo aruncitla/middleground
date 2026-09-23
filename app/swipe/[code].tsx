@@ -98,8 +98,7 @@ export default function SwipeCardScreen() {
   useEffect(() => {
     if (!user || !activeSeatId || remainingForActive.length > 0 || visibleCards.length === 0) return;
     void markFinishedSwiping(code, user.uid).catch(() => {});
-    if (votingOpen && allVoted) router.replace(`/summary/${code}`);
-  }, [user, activeSeatId, remainingForActive.length, visibleCards.length, code, votingOpen, allVoted, router]);
+  }, [user, activeSeatId, remainingForActive.length, visibleCards.length, code]);
 
   const vote = async (cardId: string, choice: 'agree' | 'disagree', seatId?: string) => {
     const sid = seatId;
@@ -166,6 +165,9 @@ export default function SwipeCardScreen() {
           <Text style={type.title} numberOfLines={1}>
             {room?.topic}
           </Text>
+          {remaining.length === visibleCards.length && mergedVotes.length > 0 ? (
+            <Text style={type.footnote}>You’re voting on what the group already wrote.</Text>
+          ) : null}
           <Text style={type.body}>
             {Math.max(visibleCards.length - remaining.length, 0)} / {visibleCards.length} · {remaining.length} left
           </Text>
@@ -201,13 +203,13 @@ export default function SwipeCardScreen() {
               <Text style={type.title}>You’re in</Text>
               <Text style={type.body}>
                 {allVoted || voteTimedOut
-                  ? 'Opening results…'
+                  ? 'Everyone in so far has voted.'
                   : 'This seat is done. Switch seat to keep voting as someone else, or peek at early results.'}
               </Text>
-              {votingOpen && !allVoted ? (
+              {votingOpen ? (
                 <Button
                   variant="secondary"
-                  label="See early results"
+                  label={allVoted ? 'See results' : 'See early results'}
                   onPress={() => router.push(`/summary/${code}`)}
                 />
               ) : null}
