@@ -95,11 +95,10 @@ export function SwipeCard({ card, stacked, onVote, mine }: Props) {
     return {
       transform: [
         { translateX: x.value },
-        { translateY: y.value },
+        { translateY: stacked ? 10 : y.value },
         { rotate: `${rotate}deg` },
-        { scale: stacked ? 0.95 : 1 },
+        { scale: stacked ? 0.96 : 1 },
       ],
-      opacity: stacked ? 0.72 : 1,
     };
   });
 
@@ -159,12 +158,13 @@ const styles = StyleSheet.create({
     right: 16,
     top: 8,
     bottom: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.card,
     borderRadius: 22,
     padding: 24,
     borderWidth: 1,
     borderColor: colors.border,
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   front: {
     zIndex: 2,
