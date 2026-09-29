@@ -44,6 +44,7 @@ import type {
 export const DEFAULT_CLOSE_WINDOW: CloseWindowId = '3d';
 
 export const CLOSE_WINDOWS: Record<CloseWindowId, { id: CloseWindowId; label: string; ms: number }> = {
+  '30m': { id: '30m', label: '30 min', ms: 30 * 60 * 1000 },
   '1h': { id: '1h', label: '1 hour', ms: 60 * 60 * 1000 },
   '24h': { id: '24h', label: '24 hours', ms: 24 * 60 * 60 * 1000 },
   '3d': { id: '3d', label: '3 days', ms: 3 * 24 * 60 * 60 * 1000 },
@@ -51,7 +52,7 @@ export const CLOSE_WINDOWS: Record<CloseWindowId, { id: CloseWindowId; label: st
 };
 
 export function parseCloseWindow(id: unknown): CloseWindowId | undefined {
-  if (id === '1h' || id === '24h' || id === '3d' || id === '7d') return id;
+  if (id === '30m' || id === '1h' || id === '24h' || id === '3d' || id === '7d') return id;
   if (id === '1d') return '24h';
   return undefined;
 }
@@ -380,7 +381,7 @@ export async function closeThoughts(code: string, uid: string, reason: CloseReas
   });
 }
 
-export async function submitEntry(code: string, uid: string, text: string, seatId?: string) {
+export async function submitEntry(code: string, uid: string, text: string, seatId?: string): Promise<Entry> {
   const trimmed = text.trim().slice(0, 280);
   if (!trimmed) throw new Error('Write something first');
   const db = getDb();
@@ -416,7 +417,14 @@ export async function submitEntry(code: string, uid: string, text: string, seatI
       tx.update(pRef, { entryCount: increment(1) });
     }
   });
-  await ensureCardForEntry(code, { id: entryRef.id, text: trimmed });
+  const created: Entry = {
+    id: entryRef.id,
+    authorId: uid,
+    text: trimmed,
+    ...(seatId ? { seatId } : {}),
+  };
+  void ensureCardForEntry(code, { id: created.id, text: created.text }).catch(() => {});
+  return created;
 }
 
 export async function ensureCardForEntry(code: string, entry: { id: string; text: string }) {
@@ -655,8 +663,18 @@ export function subscribeParticipants(code: string, cb: (rows: Participant[]) =>
 
 export function subscribeEntries(code: string, cb: (rows: Entry[]) => void): Unsubscribe {
   return onSnapshot(collection(getDb(), 'rooms', code, 'entries'), (snap) => {
-    cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Entry)));
+    cb(snap.docs.map((d) => mapEntry(d.id, d.data() as Record<string, unknown>)));
   });
+}
+
+function mapEntry(id: string, data: Record<string, unknown>): Entry {
+  const seatId = typeof data.seatId === 'string' && data.seatId ? data.seatId : undefined;
+  return {
+    id,
+    authorId: String(data.authorId ?? ''),
+    text: String(data.text ?? ''),
+    seatId,
+  };
 }
 
 function mapCard(id: string, data: Record<string, unknown>): Card {

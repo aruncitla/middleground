@@ -33,6 +33,12 @@ export function votingUnlocked(entries: Pick<Entry, 'authorId' | 'seatId' | 'tex
   return sharingSeatCount(entries) >= VOTE_UNLOCK_SEATS;
 }
 
+export function mergeLiveEntries(prev: Entry[], incoming: Entry[]) {
+  const ids = new Set(incoming.map((row) => row.id));
+  const pending = prev.filter((row) => !ids.has(row.id));
+  return pending.length ? [...incoming, ...pending] : incoming;
+}
+
 export function ownEntryIdsForSeat(entries: Entry[], seatId: string | null) {
   if (!seatId) return new Set<string>();
   return new Set(entries.filter((entry) => entryBelongsToSeat(entry, { id: seatId })).map((entry) => entry.id));

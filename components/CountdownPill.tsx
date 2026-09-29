@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { formatClosesIn } from '@/lib/formatEnds';
+import { formatClosesIn, isClosingSoon } from '@/lib/formatEnds';
 import { colors, fonts } from '@/lib/theme';
 
 export function CountdownPill({ endsAt }: { endsAt?: Date | null }) {
@@ -15,7 +15,7 @@ export function CountdownPill({ endsAt }: { endsAt?: Date | null }) {
   if (!endsAt) return null;
   const label = formatClosesIn(endsAt, now);
   const remaining = endsAt.getTime() - now;
-  const soon = remaining > 0 && remaining < 60 * 60 * 1000;
+  const soon = isClosingSoon(endsAt, now);
   const closed = remaining <= 0;
 
   return (

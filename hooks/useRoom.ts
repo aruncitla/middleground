@@ -11,7 +11,7 @@ import {
   subscribeVotes,
   containerCodeOf,
 } from '@/lib/roomService';
-import type { Agreement, Card, Entry, Participant, Room, Seat, Vote } from '@/types/room';
+import { mergeLiveEntries } from '@/lib/entries';
 
 export function useRoom(code: string | undefined) {
   const [room, setRoom] = useState<Room | null>(null);
@@ -32,7 +32,9 @@ export function useRoom(code: string | undefined) {
         setReady(true);
       }),
       subscribeParticipants(code, setParticipants),
-      subscribeEntries(code, setEntries),
+      subscribeEntries(code, (rows) => {
+        setEntries((prev) => mergeLiveEntries(prev, rows));
+      }),
       subscribeAgreements(code, setAgreements),
     ];
     return () => unsubs.forEach((u) => u());
@@ -75,5 +77,9 @@ export function useRoom(code: string | undefined) {
     void rememberJoinedRoom(uid, code, room).catch(() => {});
   }, [code, room, participants]);
 
-  return { room, participants, entries, cards, votes, agreements, seats, ready, me };
+  const rememberEntry = (entry: Entry) => {
+    setEntries((prev) => (prev.some((row) => row.id === entry.id) ? prev : [...prev, entry]));
+  };
+
+  return { room, participants, entries, cards, votes, agreements, seats, ready, me, rememberEntry };
 }

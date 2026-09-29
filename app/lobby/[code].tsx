@@ -31,10 +31,11 @@ export default function LobbyScreen() {
   const code = String(raw ?? '').toUpperCase();
   const router = useRouter();
   const { user, loading: authLoading, error: authError } = useGuestAuth();
-  const { room, participants, entries, seats, ready } = useRoom(code);
+  const { room, participants, entries, seats, ready, rememberEntry } = useRoom(code);
   const container = room ? containerCodeOf(room) : undefined;
   const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
   const closingRef = useRef(false);
@@ -66,26 +67,26 @@ export default function LobbyScreen() {
   }, [user, room, timedOut, unlocked, code]);
 
   const onReopen = async () => {
-    setBusy(true);
+    setOpening(true);
     try {
       await reopenThoughts(code);
     } catch (e) {
       notify('Could not reopen', e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setOpening(false);
     }
   };
 
   const onGoVote = async () => {
     if (!unlocked) return;
-    setBusy(true);
+    setOpening(true);
     try {
       await ensureCardsFromEntries(code);
       router.push(`/swipe/${code}`);
     } catch (e) {
       notify('Could not open voting', e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setOpening(false);
     }
   };
 
@@ -101,14 +102,15 @@ export default function LobbyScreen() {
 
   const onSubmit = async (seatId: string) => {
     if (!user) return;
-    setBusy(true);
+    setSubmitting(true);
     try {
-      await submitEntry(code, user.uid, draft, seatId);
+      const created = await submitEntry(code, user.uid, draft, seatId);
+      rememberEntry(created);
       setDraft('');
     } catch (e) {
       notify('Could not submit', e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   };
 
@@ -174,9 +176,9 @@ export default function LobbyScreen() {
               {closedBanner(room, participants)} Cooking up the cards…
             </Text>
             <Button
-              disabled={busy}
+              disabled={opening}
               variant="secondary"
-              label={busy ? 'Working…' : 'Back to sharing thoughts'}
+              label={opening ? 'Working…' : 'Back to sharing thoughts'}
               onPress={() => void onReopen()}
             />
             <Text style={type.footnote}>No one has voted yet. You can reopen thoughts for everyone.</Text>
@@ -193,15 +195,15 @@ export default function LobbyScreen() {
               style={[controls.input, styles.area]}
               multiline
             />
-            <Button disabled={busy || remaining <= 0 || room?.status !== 'lobby'} onPress={() => void onSubmit(session.seat.id)} label="Submit" />
+            <Button disabled={submitting || remaining <= 0 || room?.status !== 'lobby'} onPress={() => void onSubmit(session.seat.id)} label={submitting ? 'Submitting…' : 'Submit'} />
           </>
         )}
 
         {room?.status === 'lobby' ? (
           <View style={styles.actions}>
             <Button
-              disabled={busy || !canVote}
-              label={busy ? 'Opening…' : 'Done sharing — vote'}
+              disabled={opening || !canVote}
+              label={opening ? 'Opening…' : 'Done sharing — vote'}
               onPress={() => void onGoVote()}
             />
             <Text style={type.footnote}>
@@ -211,7 +213,7 @@ export default function LobbyScreen() {
                   ? 'Share a thought first, then you can vote on everyone else’s.'
                   : 'Moves you to voting. Other people can keep sharing.'}
             </Text>
-            <Button disabled={busy} variant="secondary" label="Leave for now" onPress={onLeave} />
+            <Button disabled={submitting || opening} variant="secondary" label="Leave for now" onPress={onLeave} />
           </View>
         ) : null}
       </View>
