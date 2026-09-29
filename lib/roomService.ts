@@ -41,10 +41,20 @@ import type {
   Vote,
 } from '@/types/room';
 
+export const DEFAULT_CLOSE_WINDOW: CloseWindowId = '3d';
+
 export const CLOSE_WINDOWS: Record<CloseWindowId, { id: CloseWindowId; label: string; ms: number }> = {
   '1h': { id: '1h', label: '1 hour', ms: 60 * 60 * 1000 },
-  '1d': { id: '1d', label: '1 day', ms: 24 * 60 * 60 * 1000 },
+  '24h': { id: '24h', label: '24 hours', ms: 24 * 60 * 60 * 1000 },
+  '3d': { id: '3d', label: '3 days', ms: 3 * 24 * 60 * 60 * 1000 },
+  '7d': { id: '7d', label: '7 days', ms: 7 * 24 * 60 * 60 * 1000 },
 };
+
+export function parseCloseWindow(id: unknown): CloseWindowId | undefined {
+  if (id === '1h' || id === '24h' || id === '3d' || id === '7d') return id;
+  if (id === '1d') return '24h';
+  return undefined;
+}
 
 export const DEFAULT_ENTRY_LIMIT = 10;
 export const DECK_LIMIT = 20;
@@ -127,7 +137,7 @@ export async function createRoom(
 ): Promise<string> {
   const trimmed = topic.trim();
   if (!trimmed) throw new Error('Topic is required');
-  const window = CLOSE_WINDOWS[extras?.closeWindow ?? '1h'];
+  const window = CLOSE_WINDOWS[parseCloseWindow(extras?.closeWindow) ?? DEFAULT_CLOSE_WINDOW];
   const kind = inferKind(extras);
   const name = (extras?.name ?? trimmed).trim().slice(0, 80) || 'Room';
 
@@ -322,7 +332,7 @@ export async function closeVotingIfOpen(code: string): Promise<boolean> {
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('Room not found');
-    if (snap.data().status !== 'swiping') return false;
+    if (snap.data().status !== 'swiping' && snap.data().status !== 'lobby') return false;
     tx.update(ref, { status: 'summary' });
     return true;
   });
@@ -388,6 +398,7 @@ export async function submitEntry(code: string, uid: string, text: string, seatI
     return data.authorId === uid && !data.seatId;
   }).length;
   if (used >= limit) throw new Error('Entry limit reached');
+  const entryRef = doc(collection(db, 'rooms', code, 'entries'));
   await runTransaction(db, async (tx) => {
     const latest = await tx.get(rRef);
     const pSnap = await tx.get(pRef);
@@ -395,7 +406,6 @@ export async function submitEntry(code: string, uid: string, text: string, seatI
     if (!pSnap.exists()) throw new Error('Join the room first');
     if ((latest.data() as Room).status !== 'lobby') throw new Error('Submissions are closed');
     const participant = pSnap.data() as Participant;
-    const entryRef = doc(collection(db, 'rooms', code, 'entries'));
     tx.set(entryRef, {
       authorId: uid,
       text: trimmed,
@@ -406,18 +416,56 @@ export async function submitEntry(code: string, uid: string, text: string, seatI
       tx.update(pRef, { entryCount: increment(1) });
     }
   });
+  await ensureCardForEntry(code, { id: entryRef.id, text: trimmed });
 }
 
-function closeWindowMs(data: Record<string, unknown> | undefined) {
-  const id = data?.closeWindow;
-  if (id === '1h' || id === '1d') return CLOSE_WINDOWS[id].ms;
-  return CLOSE_WINDOWS['1h'].ms;
+export async function ensureCardForEntry(code: string, entry: { id: string; text: string }) {
+  const trimmed = entry.text.trim().slice(0, 280);
+  if (!trimmed) return;
+  const ref = doc(getDb(), 'rooms', code, 'cards', entry.id);
+  const snap = await getDoc(ref);
+  if (snap.exists()) return;
+  await setDoc(ref, {
+    text: trimmed,
+    kind: 'synthesized',
+    order: Date.now(),
+    agreeCount: 0,
+    disagreeCount: 0,
+    createdAt: serverTimestamp(),
+    sourceEntryIds: [entry.id],
+    sourceCount: 1,
+  });
+}
+
+export async function ensureCardsFromEntries(code: string) {
+  const db = getDb();
+  const [entrySnap, cardSnap] = await Promise.all([
+    getDocs(collection(db, 'rooms', code, 'entries')),
+    getDocs(collection(db, 'rooms', code, 'cards')),
+  ]);
+  const already = new Set<string>();
+  for (const row of cardSnap.docs) {
+    already.add(row.id);
+    const sources = row.data().sourceEntryIds;
+    if (Array.isArray(sources)) {
+      for (const id of sources) {
+        if (typeof id === 'string') already.add(id);
+      }
+    }
+  }
+  for (const row of entrySnap.docs) {
+    if (already.has(row.id)) continue;
+    const text = String(row.data().text ?? '');
+    await ensureCardForEntry(code, { id: row.id, text });
+  }
 }
 
 function nextVoteDeadline(data: Record<string, unknown> | undefined) {
   const existing = toDate(data?.votesCloseAt);
   if (existing) return existing;
-  return new Date(Date.now() + closeWindowMs(data));
+  const roomEnd = toDate(data?.closesAt);
+  if (roomEnd && roomEnd.getTime() > Date.now()) return roomEnd;
+  return new Date(Date.now() + CLOSE_WINDOWS['1h'].ms);
 }
 
 export async function writeSynthesizedCards(code: string, cards: SynthesisCard[]) {
@@ -472,8 +520,8 @@ export async function castVote(
   await runTransaction(db, async (tx) => {
     const roomSnap = await tx.get(roomRef(code));
     const room = roomSnap.data();
-    if (!room || room.status !== 'swiping') throw new Error('Voting is closed');
-    const until = toDate(room.votesCloseAt);
+    if (!room || (room.status !== 'swiping' && room.status !== 'lobby')) throw new Error('Voting is closed');
+    const until = toDate(room.votesCloseAt) ?? toDate(room.closesAt);
     if (until && Date.now() > until.getTime()) throw new Error('Voting ended');
     const existing = await tx.get(voteRef);
     const cardSnap = await tx.get(cardRef);
@@ -517,6 +565,7 @@ export async function startRoundTwo(
     parentRoomId: parentTopicId,
     parentCardId: card.id,
     containerId,
+    closeWindow: parent?.closeWindow ?? DEFAULT_CLOSE_WINDOW,
   });
   await copyParticipants(parentCode, next, people);
   const db = getDb();
@@ -585,7 +634,7 @@ function mapRoom(id: string, data: Record<string, unknown>): Room {
     parentCardId: data.parentCardId ? String(data.parentCardId) : undefined,
     closesAt: toDate(data.closesAt) ?? undefined,
     votesCloseAt: toDate(data.votesCloseAt) ?? undefined,
-    closeWindow: data.closeWindow === '1h' || data.closeWindow === '1d' ? data.closeWindow : undefined,
+    closeWindow: parseCloseWindow(data.closeWindow),
     closedBy: data.closedBy ? String(data.closedBy) : undefined,
     closeReason: closeReason === 'manual' || closeReason === 'timeout' ? closeReason : undefined,
     createdAt: toDate(data.createdAt) ?? undefined,

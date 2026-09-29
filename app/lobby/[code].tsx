@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
+import { CountdownPill } from '@/components/CountdownPill';
 import { ParticipantCluster } from '@/components/ParticipantCluster';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
@@ -11,13 +12,12 @@ import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
-import { callSynthesizeRoom, mockSynthesize } from '@/lib/aiSynthesis';
-import { seatEntryCount } from '@/lib/entries';
+import { thoughtShareUrl } from '@/lib/app';
+import { seatEntryCount, sharingSeatCount, votingUnlocked } from '@/lib/entries';
 import { notify } from '@/lib/notify';
 import { avatarById, colors, controls, type } from '@/lib/theme';
-import { closeThoughts, containerCodeOf, reopenThoughts, submitEntry, writeSynthesizedCards } from '@/lib/roomService';
-import { formatEndedAt, formatEndsAt } from '@/lib/formatEnds';
-import type { CloseReason, Participant, Room } from '@/types/room';
+import { closeVotingIfOpen, containerCodeOf, ensureCardsFromEntries, reopenThoughts, submitEntry } from '@/lib/roomService';
+import type { Participant, Room } from '@/types/room';
 
 function closedBanner(room: Room, participants: Participant[]) {
   if (room.closeReason === 'timeout') return 'Time ran out — thoughts are closed.';
@@ -35,12 +35,14 @@ export default function LobbyScreen() {
   const container = room ? containerCodeOf(room) : undefined;
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [confirmingClose, setConfirmingClose] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
   const closingRef = useRef(false);
 
   const msLeft = room?.closesAt ? room.closesAt.getTime() - now : null;
   const timedOut = msLeft != null && msLeft <= 0;
+  const unlocked = votingUnlocked(entries);
+  const sharedSeats = sharingSeatCount(entries);
 
   useEffect(() => {
     if (!room) return;
@@ -54,39 +56,14 @@ export default function LobbyScreen() {
     return () => clearInterval(id);
   }, [room?.status, room?.closesAt]);
 
-  const runClose = async (reason: CloseReason) => {
-    if (!user || !room || closingRef.current) return;
-    closingRef.current = true;
-    setBusy(true);
-    try {
-      const won = await closeThoughts(code, user.uid, reason);
-      if (!won) return;
-      try {
-        await callSynthesizeRoom(code);
-      } catch {
-        await writeSynthesizedCards(code, mockSynthesize(entries, room.topic));
-      }
-    } catch (e) {
-      notify('Could not close', e instanceof Error ? e.message : String(e));
-      closingRef.current = false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
   useEffect(() => {
-    if (!user || !room || room.status !== 'lobby' || entries.length === 0 || !timedOut) return;
-    void runClose('timeout');
-  }, [user?.uid, room?.status, timedOut, entries.length]);
-
-  const onLeave = () => {
-    router.replace('/');
-  };
-
-  const onConfirmClose = async () => {
-    await runClose('manual');
-    setConfirmingClose(false);
-  };
+    if (!user || !room || room.status !== 'lobby' || !timedOut || closingRef.current) return;
+    if (!unlocked) return;
+    closingRef.current = true;
+    void closeVotingIfOpen(code).catch(() => {
+      closingRef.current = false;
+    });
+  }, [user, room, timedOut, unlocked, code]);
 
   const onReopen = async () => {
     setBusy(true);
@@ -97,6 +74,29 @@ export default function LobbyScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const onGoVote = async () => {
+    if (!unlocked) return;
+    setBusy(true);
+    try {
+      await ensureCardsFromEntries(code);
+      router.push(`/swipe/${code}`);
+    } catch (e) {
+      notify('Could not open voting', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCopyLink = async () => {
+    await Clipboard.setStringAsync(thoughtShareUrl(code));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+
+  const onLeave = () => {
+    router.replace('/');
   };
 
   const onSubmit = async (seatId: string) => {
@@ -119,6 +119,8 @@ export default function LobbyScreen() {
           const memberCount = session.seats.length || participants.length || seats.length;
           const avatar = avatarById(session.seat.avatarId);
           const remaining = Math.max(0, (room?.entryLimit ?? 10) - seatEntryCount(entries, session.seat));
+          const myThoughts = seatEntryCount(entries, session.seat);
+          const canVote = unlocked && myThoughts > 0 && !timedOut;
           return (
       <View style={styles.page}>
         <BrandMark size="sm" />
@@ -140,8 +142,10 @@ export default function LobbyScreen() {
             {avatar.emoji} {session.seat.displayName} · Switch seat
           </Text>
         </Pressable>
-        <Pressable onPress={() => void Clipboard.setStringAsync(code)} accessibilityRole="button">
-          <Text style={controls.ghostText}>Tap to copy code</Text>
+        <Pressable onPress={() => void onCopyLink()} accessibilityRole="button">
+          <Text style={controls.ghostText}>
+            {copied ? 'Copied — paste it in your chat groups' : 'Copy the invite link and share in your chat groups'}
+          </Text>
         </Pressable>
         <Text style={type.title}>{room?.topic}</Text>
         <Text style={type.body}>
@@ -149,13 +153,18 @@ export default function LobbyScreen() {
         </Text>
         <ParticipationStats participants={participants} seats={session.seats} entries={entries} />
         {room?.status === 'lobby' && room.closesAt ? (
-          <Text style={timedOut ? styles.closed : type.body}>
-            {timedOut
-              ? entries.length === 0
-                ? `Time’s up (${formatEndedAt(room.closesAt)}). Add a thought, then close.`
-                : 'Time’s up — closing thoughts…'
-              : `${formatEndsAt(room.closesAt)} · anyone can close thoughts for everyone sooner`}
-          </Text>
+          <>
+            <CountdownPill endsAt={room.closesAt} />
+            <Text style={timedOut ? styles.closed : type.footnote}>
+              {timedOut
+                ? unlocked
+                  ? 'Time’s up — locking the room…'
+                  : 'Time’s up. Voting needed two people with thoughts.'
+                : unlocked
+                  ? 'Two people have shared. You can keep writing or start voting.'
+                  : `Voting opens when two people share a thought · ${sharedSeats}/2 so far`}
+            </Text>
+          </>
         ) : null}
         <ParticipantCluster participants={participants} seats={session.seats} entries={entries} />
 
@@ -174,7 +183,7 @@ export default function LobbyScreen() {
           </>
         ) : (
           <>
-            <Text style={[type.label, styles.label]}>Your take ({remaining} left)</Text>
+            <Text style={[type.label, styles.label]}>Your thought ({remaining} left)</Text>
             <TextInput
               value={draft}
               onChangeText={setDraft}
@@ -189,41 +198,21 @@ export default function LobbyScreen() {
         )}
 
         {room?.status === 'lobby' ? (
-          confirmingClose ? (
-            <View style={styles.confirm}>
-              <Text style={type.section}>Close thoughts for everyone?</Text>
-              <Text style={type.body}>
-                This will close thoughts for all users and proceed to voting.
-              </Text>
-              <Button
-                disabled={busy}
-                label={busy ? 'Working…' : 'Close for everyone'}
-                onPress={() => void onConfirmClose()}
-              />
-              <Button
-                disabled={busy}
-                variant="secondary"
-                label="Cancel"
-                onPress={() => setConfirmingClose(false)}
-              />
-            </View>
-          ) : (
-            <View style={styles.actions}>
-              <Button
-                disabled={busy}
-                variant="secondary"
-                label="Leave for now"
-                onPress={onLeave}
-              />
-              <Text style={type.footnote}>Goes home. The group can keep sharing thoughts.</Text>
-              <Button
-                disabled={busy || entries.length === 0}
-                variant="secondary"
-                label="Close thoughts for everyone"
-                onPress={() => setConfirmingClose(true)}
-              />
-            </View>
-          )
+          <View style={styles.actions}>
+            <Button
+              disabled={busy || !canVote}
+              label={busy ? 'Opening…' : 'Done sharing — vote'}
+              onPress={() => void onGoVote()}
+            />
+            <Text style={type.footnote}>
+              {!unlocked
+                ? 'Waiting for one more person to share a thought.'
+                : myThoughts === 0
+                  ? 'Share a thought first, then you can vote on everyone else’s.'
+                  : 'Moves you to voting. Other people can keep sharing.'}
+            </Text>
+            <Button disabled={busy} variant="secondary" label="Leave for now" onPress={onLeave} />
+          </View>
         ) : null}
       </View>
           );

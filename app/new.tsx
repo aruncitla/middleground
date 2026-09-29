@@ -8,7 +8,7 @@ import { Screen } from '@/components/Screen';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { notify } from '@/lib/notify';
 import { loadProfile, saveProfile } from '@/lib/profileLocal';
-import { CLOSE_WINDOWS, createRoom, createSeat, createTopicInRoom, joinRoom, isSeatTakenError, peekRoom, rememberJoinedRoom } from '@/lib/roomService';
+import { CLOSE_WINDOWS, createRoom, createSeat, createTopicInRoom, joinRoom, isSeatTakenError, peekRoom, rememberJoinedRoom, DEFAULT_CLOSE_WINDOW } from '@/lib/roomService';
 import type { TopicMode } from '@/lib/promptPacks';
 import { colors, controls, type } from '@/lib/theme';
 import type { CloseWindowId } from '@/types/room';
@@ -31,7 +31,7 @@ export default function NewTopicScreen() {
   const [roomName, setRoomName] = useState('');
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [closeWindow, setCloseWindow] = useState<CloseWindowId>('1h');
+  const [closeWindow, setCloseWindow] = useState<CloseWindowId>(DEFAULT_CLOSE_WINDOW);
   const [mode, setMode] = useState<TopicMode>('debate');
 
   useEffect(() => {
@@ -164,7 +164,8 @@ export default function NewTopicScreen() {
               </Pressable>
             ))}
           </View>
-          <Text style={[type.label, styles.label]}>Close thoughts after</Text>
+          <Text style={[type.label, styles.label]}>Room closes after</Text>
+          <Text style={type.footnote}>Thoughts and votes both freeze then.</Text>
           <View style={styles.row}>
             {(Object.values(CLOSE_WINDOWS) as { id: CloseWindowId; label: string }[]).map((window) => (
               <Pressable

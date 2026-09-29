@@ -10,28 +10,28 @@ import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
-import { VoteButtons } from '@/components/VoteButtons';
+import { CountdownPill } from '@/components/CountdownPill';
+import { seatEntryCount, votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
 import { isGenericFillerText } from '@/lib/cardQuality';
-import { formatVoteDeadline } from '@/lib/formatEnds';
+import { liveDeadline } from '@/lib/formatEnds';
 import { notify } from '@/lib/notify';
 import { shareConsensusCard } from '@/lib/shareConsensus';
 import { avatarById } from '@/lib/theme';
-import { containerCodeOf, castVote, closeVotingIfOpen, joinRoom, recordUnanimousAgreements, reopenThoughts, startRoundTwo } from '@/lib/roomService';
+import { containerCodeOf, closeVotingIfOpen, joinRoom, recordUnanimousAgreements, reopenThoughts, startRoundTwo } from '@/lib/roomService';
 import {
-  allSeatsCompletedDeck,
   cardVotingComplete,
   choiceForSeat,
-  mergeVotes,
-  optimisticVote,
   rosterSeatIds,
   seatsFinishedCount,
   seatsStartedCount,
+  seatCompletedDeck,
+  seatStartedVoting,
   sortCards,
-  voteKey,
+  voteScreenForSeat,
   withVoteTallies,
 } from '@/lib/voteTally';
 import { colors, controls, type } from '@/lib/theme';
-import type { Card, Vote } from '@/types/room';
+import type { Card } from '@/types/room';
 
 type Bucket = 'everyone' | 'many' | 'some' | 'none';
 
@@ -63,7 +63,6 @@ export default function SummaryScreen() {
   const { room, cards, participants, entries, votes, agreements, seats, ready } = useRoom(code);
   const container = room ? containerCodeOf(room) : undefined;
   const [activeSeatId, setActiveSeatId] = useState<string | null>(null);
-  const [localVotes, setLocalVotes] = useState<Vote[]>([]);
   const [busy, setBusy] = useState(false);
   const [ending, setEnding] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -72,11 +71,7 @@ export default function SummaryScreen() {
   const cardRef = useRef<View>(null);
   const endingRef = useRef(false);
 
-  useEffect(() => {
-    setLocalVotes([]);
-  }, [code]);
-
-  const mergedVotes = useMemo(() => mergeVotes(votes, localVotes), [votes, localVotes]);
+  const mergedVotes = votes;
   const talliedCards = useMemo(() => withVoteTallies(cards, mergedVotes), [cards, mergedVotes]);
   const reportCards = useMemo(
     () => sortCards(talliedCards.filter((c) => !isGenericFillerText(c.text))),
@@ -86,15 +81,22 @@ export default function SummaryScreen() {
   const rosterIds = useMemo(() => rosterSeatIds(seats, participants), [seats, participants]);
   const me = participants.find((p) => p.id === user?.uid);
   const isHost = Boolean(user && room && user.uid === room.hostId);
-  const isEarly = room?.status === 'swiping';
+  const unlocked = votingUnlocked(entries);
+  const inPlay = room?.status === 'swiping' || (room?.status === 'lobby' && unlocked);
+  const isEarly = Boolean(inPlay);
   const resultsLocked = room?.status === 'summary';
-  const voteEnds = room?.votesCloseAt;
+  const voteEnds = liveDeadline(room);
   const voteTimedOut = Boolean(voteEnds && now >= voteEnds.getTime());
-  const votingOpen = isEarly && !voteTimedOut;
+  const votingOpen = Boolean(inPlay && !voteTimedOut);
   const finishedCount = seatsFinishedCount(rosterIds, mergedVotes, cardIds);
   const startedCount = seatsStartedCount(rosterIds, mergedVotes, cardIds);
   const waitingVote = Math.max(0, rosterIds.length - finishedCount);
-  const allVoted = allSeatsCompletedDeck(rosterIds, mergedVotes, cardIds);
+  const allVoted =
+    rosterIds.length > 0 &&
+    rosterIds.every((id) => {
+      const needed = votableCardIdsForSeat(reportCards, entries, id);
+      return needed.length === 0 || seatCompletedDeck(mergedVotes, id, needed);
+    });
   const canHostEnd = isHost && isEarly && (allVoted || voteTimedOut);
   const grouped = useMemo(() => {
     const next: Record<Bucket, Card[]> = { everyone: [], many: [], some: [], none: [] };
@@ -134,32 +136,41 @@ export default function SummaryScreen() {
 
   const leftoverForActive = useMemo(() => {
     if (!activeSeatId) return 0;
-    return cardIds.filter((id) => !choiceForSeat(mergedVotes, activeSeatId, id)).length;
-  }, [cardIds, mergedVotes, activeSeatId]);
+    const needed = votableCardIdsForSeat(reportCards, entries, activeSeatId);
+    return needed.filter((id) => !choiceForSeat(mergedVotes, activeSeatId, id)).length;
+  }, [reportCards, entries, mergedVotes, activeSeatId]);
 
   useEffect(() => {
     if (!room) return;
-    if (room.status === 'lobby' || room.status === 'synthesizing') router.replace(`/lobby/${code}`);
-  }, [room, code, router]);
+    if (room.status === 'synthesizing') router.replace(`/lobby/${code}`);
+    if (room.status === 'lobby' && !unlocked) router.replace(`/lobby/${code}`);
+    if (room.status === 'lobby' && activeSeatId && seatEntryCount(entries, { id: activeSeatId }) === 0) {
+      router.replace(`/lobby/${code}`);
+    }
+  }, [room, unlocked, activeSeatId, entries, code, router]);
 
   useEffect(() => {
     if (!votingOpen || !activeSeatId || cardIds.length === 0) return;
-    if (leftoverForActive > 0) router.replace(`/swipe/${code}`);
-  }, [votingOpen, activeSeatId, leftoverForActive, cardIds.length, code, router]);
+    if (room?.status === 'lobby' && seatEntryCount(entries, { id: activeSeatId }) === 0) return;
+    const hasStarted = seatStartedVoting(mergedVotes, activeSeatId, votableCardIdsForSeat(reportCards, entries, activeSeatId));
+    if (voteScreenForSeat({ leftover: leftoverForActive, hasStarted, again: false }) === 'swipe') {
+      router.replace(`/swipe/${code}`);
+    }
+  }, [votingOpen, activeSeatId, leftoverForActive, cardIds, mergedVotes, entries, reportCards, room?.status, code, router]);
 
   useEffect(() => {
-    if (room?.status !== 'swiping' || !room.votesCloseAt) return;
+    if (!inPlay || !voteEnds) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [room?.status, room?.votesCloseAt]);
+  }, [inPlay, voteEnds]);
 
   useEffect(() => {
-    if (!user || !voteTimedOut || room?.status !== 'swiping' || endingRef.current) return;
+    if (!user || !voteTimedOut || !inPlay || endingRef.current) return;
     endingRef.current = true;
     void closeVotingIfOpen(code).catch(() => {
       endingRef.current = false;
     });
-  }, [user, voteTimedOut, room?.status, code]);
+  }, [user, voteTimedOut, inPlay, code]);
 
   useEffect(() => {
     if (!room || !user || room.status !== 'summary') return;
@@ -211,20 +222,6 @@ export default function SummaryScreen() {
     }
   };
 
-  const onVote = async (cardId: string, choice: 'agree' | 'disagree', seatId?: string) => {
-    const sid = seatId;
-    if (!user || !sid || !votingOpen) return;
-    setActiveSeatId(sid);
-    const nextVote = optimisticVote({ uid: user.uid, seatId: sid, cardId, choice });
-    setLocalVotes((prev) => mergeVotes(prev, [nextVote]));
-    try {
-      await castVote(code, user.uid, cardId, choice, sid);
-    } catch (e) {
-      setLocalVotes((prev) => prev.filter((v) => voteKey(v) !== voteKey(nextVote)));
-      notify('Vote failed', e instanceof Error ? e.message : String(e));
-    }
-  };
-
   const onStartDiscussion = async (card: Card) => {
     if (!user) return;
     setBusy(true);
@@ -257,12 +254,13 @@ export default function SummaryScreen() {
       ) : null}
       <Text style={styles.body}>{card.text}</Text>
       {votingOpen ? (
-        <VoteButtons
-          compact
-          current={choiceForSeat(mergedVotes, opts.seatId, card.id)}
-          onAgree={() => void onVote(card.id, 'agree', opts.seatId)}
-          onDisagree={() => void onVote(card.id, 'disagree', opts.seatId)}
-        />
+        <Text style={type.footnote}>
+          {choiceForSeat(mergedVotes, opts.seatId, card.id) === 'agree'
+            ? 'You voted yes'
+            : choiceForSeat(mergedVotes, opts.seatId, card.id) === 'disagree'
+              ? 'You voted no'
+              : 'New — not voted yet'}
+        </Text>
       ) : opts.canStart && pendingDiscussionId === card.id ? (
         <View style={styles.confirm}>
           <Text style={type.footnote}>
@@ -342,7 +340,7 @@ export default function SummaryScreen() {
                       ? `Voting is still open · ${waitingVote} people still have cards left.`
                       : `Voting is still open · ${waitingVote} people haven’t voted yet.`}
             </Text>
-            {voteEnds ? <Text style={type.body}>{formatVoteDeadline(voteEnds, now)}</Text> : null}
+            {voteEnds ? <CountdownPill endsAt={voteEnds} /> : null}
             <ParticipationStats
               participants={participants}
               seats={session.seats}
@@ -351,6 +349,18 @@ export default function SummaryScreen() {
               cardIds={cardIds}
               showVotes
             />
+            {votingOpen && leftoverForActive > 0 && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
+              <>
+                <Text style={type.body}>New thoughts came up for voting</Text>
+                <Button label="Swipe again" onPress={() => router.push(`/swipe/${code}?again=1`)} />
+              </>
+            ) : votingOpen && leftoverForActive === 0 && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
+              <Button
+                variant="secondary"
+                label="Swipe again"
+                onPress={() => router.push(`/swipe/${code}?again=review`)}
+              />
+            ) : null}
             {mergedVotes.length === 0 && votingOpen ? (
               <>
                 <Button
@@ -373,9 +383,6 @@ export default function SummaryScreen() {
                   <Text style={type.footnote}>You can end voting once everyone has voted, or when time runs out.</Text>
                 ) : null}
               </>
-            ) : null}
-            {votingOpen ? (
-              <Text style={type.footnote}>Change any vote below until voting ends. Your vote is highlighted.</Text>
             ) : null}
           </>
         ) : null}

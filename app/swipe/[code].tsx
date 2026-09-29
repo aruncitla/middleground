@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
+import { CountdownPill } from '@/components/CountdownPill';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { Screen } from '@/components/Screen';
@@ -11,38 +12,46 @@ import { SwipeCard } from '@/components/SwipeCard';
 import { VoteButtons } from '@/components/VoteButtons';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
+import { cardOwnedBySeat, ownEntryIdsForSeat, seatEntryCount, votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
 import { isGenericFillerText } from '@/lib/cardQuality';
-import { formatVoteDeadline } from '@/lib/formatEnds';
+import { liveDeadline } from '@/lib/formatEnds';
 import { notify } from '@/lib/notify';
 import { avatarById, colors, controls, type } from '@/lib/theme';
 import { containerCodeOf, castVote, closeVotingIfOpen, ensureVoteDeadline, markFinishedSwiping, reopenThoughts } from '@/lib/roomService';
 import {
-  allSeatsCompletedDeck,
   choiceForSeat,
   mergeVotes,
   optimisticVote,
   rosterSeatIds,
+  seatCompletedDeck,
+  seatStartedVoting,
   sortCards,
   voteKey,
+  voteScreenForSeat,
 } from '@/lib/voteTally';
 import type { Card, Vote } from '@/types/room';
 
 export default function SwipeCardScreen() {
-  const { code: raw } = useLocalSearchParams<{ code: string }>();
+  const { code: raw, again: rawAgain } = useLocalSearchParams<{ code: string; again?: string }>();
   const code = String(raw ?? '').toUpperCase();
+  const againParam = Array.isArray(rawAgain) ? rawAgain[0] : String(rawAgain ?? '');
+  const swipeAgain = againParam === '1';
+  const reviewVotes = againParam === 'review';
   const router = useRouter();
   const { user, loading: authLoading, error: authError } = useGuestAuth();
   const { room, participants, entries, cards, votes, seats, ready } = useRoom(code);
   const container = room ? containerCodeOf(room) : undefined;
   const [activeSeatId, setActiveSeatId] = useState<string | null>(null);
   const [localVotes, setLocalVotes] = useState<Vote[]>([]);
+  const [reviewedIds, setReviewedIds] = useState<string[]>([]);
   const [ending, setEnding] = useState(false);
   const [now, setNow] = useState(Date.now());
   const endingRef = useRef(false);
 
   useEffect(() => {
     setLocalVotes([]);
-  }, [code]);
+    setReviewedIds([]);
+  }, [code, againParam]);
 
   const mergedVotes = useMemo(() => mergeVotes(votes, localVotes), [votes, localVotes]);
   const visibleCards = useMemo(
@@ -52,29 +61,41 @@ export default function SwipeCardScreen() {
   const cardIds = useMemo(() => visibleCards.map((card) => card.id), [visibleCards]);
   const rosterIds = useMemo(() => rosterSeatIds(seats, participants), [seats, participants]);
 
-  const remainingForActive = useMemo(() => {
-    if (!activeSeatId) return visibleCards;
-    return visibleCards.filter((card) => !choiceForSeat(mergedVotes, activeSeatId, card.id));
-  }, [visibleCards, mergedVotes, activeSeatId]);
+  const ownEntryIds = useMemo(() => ownEntryIdsForSeat(entries, activeSeatId), [entries, activeSeatId]);
+  const votableCards = useMemo(
+    () => visibleCards.filter((card) => !cardOwnedBySeat(card, ownEntryIds)),
+    [visibleCards, ownEntryIds],
+  );
+  const leftoverForActive = useMemo(() => {
+    if (!activeSeatId) return votableCards.length;
+    return votableCards.filter((card) => !choiceForSeat(mergedVotes, activeSeatId, card.id)).length;
+  }, [votableCards, mergedVotes, activeSeatId]);
+  const hasStarted = Boolean(activeSeatId && seatStartedVoting(mergedVotes, activeSeatId, votableCardIdsForSeat(visibleCards, entries, activeSeatId)));
+  const unlocked = votingUnlocked(entries);
+  const inPlay = room?.status === 'swiping' || (room?.status === 'lobby' && unlocked);
 
-  const myEntryIds = useMemo(() => {
-    if (!user) return new Set<string>();
-    return new Set(entries.filter((e) => e.authorId === user.uid).map((e) => e.id));
-  }, [entries, user]);
-  const cardIsMine = (card: Card | undefined) =>
-    Boolean(card?.sourceEntryIds?.some((id) => myEntryIds.has(id)));
+  const cardIsMine = (card: Card | undefined) => Boolean(card && cardOwnedBySeat(card, ownEntryIds));
   const isHost = Boolean(user && room && user.uid === room.hostId);
-  const allVoted = allSeatsCompletedDeck(rosterIds, mergedVotes, cardIds);
+  const allVoted =
+    rosterIds.length > 0 &&
+    rosterIds.every((id) => {
+      const needed = votableCardIdsForSeat(visibleCards, entries, id);
+      return needed.length === 0 || seatCompletedDeck(mergedVotes, id, needed);
+    });
 
-  const voteEnds = room?.votesCloseAt;
+  const voteEnds = liveDeadline(room);
   const voteTimedOut = Boolean(voteEnds && now >= voteEnds.getTime());
-  const votingOpen = room?.status === 'swiping' && !voteTimedOut;
+  const votingOpen = Boolean(inPlay && !voteTimedOut);
 
   useEffect(() => {
     if (!room) return;
-    if (room.status === 'lobby' || room.status === 'synthesizing') router.replace(`/lobby/${code}`);
+    if (room.status === 'synthesizing') router.replace(`/lobby/${code}`);
+    if (room.status === 'lobby' && !unlocked) router.replace(`/lobby/${code}`);
+    if (room.status === 'lobby' && activeSeatId && seatEntryCount(entries, { id: activeSeatId }) === 0) {
+      router.replace(`/lobby/${code}`);
+    }
     if (room.status === 'summary') router.replace(`/summary/${code}`);
-  }, [room, code, router]);
+  }, [room, unlocked, activeSeatId, entries, code, router]);
 
   useEffect(() => {
     if (room?.status !== 'swiping') return;
@@ -82,23 +103,50 @@ export default function SwipeCardScreen() {
   }, [room?.status, room?.votesCloseAt, code]);
 
   useEffect(() => {
-    if (room?.status !== 'swiping' || !room.votesCloseAt) return;
+    if (!inPlay || !voteEnds) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [room?.status, room?.votesCloseAt]);
+  }, [inPlay, voteEnds]);
 
   useEffect(() => {
-    if (!user || !voteTimedOut || room?.status !== 'swiping' || endingRef.current) return;
+    if (!user || !voteTimedOut || !inPlay || endingRef.current) return;
     endingRef.current = true;
     void closeVotingIfOpen(code).catch(() => {
       endingRef.current = false;
     });
-  }, [user, voteTimedOut, room?.status, code]);
+  }, [user, voteTimedOut, inPlay, code]);
 
   useEffect(() => {
-    if (!user || !activeSeatId || remainingForActive.length > 0 || visibleCards.length === 0) return;
+    if (!user || !activeSeatId || leftoverForActive > 0 || votableCards.length === 0) return;
     void markFinishedSwiping(code, user.uid).catch(() => {});
-  }, [user, activeSeatId, remainingForActive.length, visibleCards.length, code]);
+  }, [user, activeSeatId, leftoverForActive, votableCards.length, code]);
+
+  useEffect(() => {
+    if (!votingOpen || !activeSeatId) return;
+    if (reviewVotes) {
+      if (!hasStarted) return;
+      const reviewLeft = votableCards.filter(
+        (card) => choiceForSeat(mergedVotes, activeSeatId, card.id) && !reviewedIds.includes(card.id),
+      );
+      if (reviewLeft.length === 0) router.replace(`/summary/${code}`);
+      return;
+    }
+    if (leftoverForActive === 0 && votableCards.length === 0 && !hasStarted) return;
+    const screen = voteScreenForSeat({ leftover: leftoverForActive, hasStarted, again: swipeAgain });
+    if (screen === 'summary') router.replace(`/summary/${code}`);
+  }, [
+    votingOpen,
+    activeSeatId,
+    leftoverForActive,
+    votableCards,
+    hasStarted,
+    swipeAgain,
+    reviewVotes,
+    reviewedIds,
+    mergedVotes,
+    code,
+    router,
+  ]);
 
   const vote = async (cardId: string, choice: 'agree' | 'disagree', seatId?: string) => {
     const sid = seatId;
@@ -106,10 +154,12 @@ export default function SwipeCardScreen() {
     setActiveSeatId(sid);
     const nextVote = optimisticVote({ uid: user.uid, seatId: sid, cardId, choice });
     setLocalVotes((prev) => mergeVotes(prev, [nextVote]));
+    if (reviewVotes) setReviewedIds((prev) => (prev.includes(cardId) ? prev : [...prev, cardId]));
     try {
       await castVote(code, user.uid, cardId, choice, sid);
     } catch (e) {
       setLocalVotes((prev) => prev.filter((v) => voteKey(v) !== voteKey(nextVote)));
+      if (reviewVotes) setReviewedIds((prev) => prev.filter((id) => id !== cardId));
       notify('Vote failed', e instanceof Error ? e.message : String(e));
     }
   };
@@ -147,11 +197,16 @@ export default function SwipeCardScreen() {
       >
         {(session) => {
           const avatar = avatarById(session.seat.avatarId);
-          const remaining = visibleCards.filter(
-            (card) => !choiceForSeat(mergedVotes, session.seat.id, card.id),
-          );
+          const remaining = reviewVotes
+            ? votableCards.filter(
+                (card) =>
+                  Boolean(choiceForSeat(mergedVotes, session.seat.id, card.id)) &&
+                  !reviewedIds.includes(card.id),
+              )
+            : votableCards.filter((card) => !choiceForSeat(mergedVotes, session.seat.id, card.id));
           const top = remaining[0];
           const next = remaining[1];
+          const priorChoice = top ? choiceForSeat(mergedVotes, session.seat.id, top.id) : undefined;
           return (
       <View style={styles.page}>
         <View style={styles.header}>
@@ -165,16 +220,19 @@ export default function SwipeCardScreen() {
           <Text style={type.title} numberOfLines={1}>
             {room?.topic}
           </Text>
-          {remaining.length === visibleCards.length && mergedVotes.length > 0 ? (
+          {reviewVotes ? (
+            <Text style={type.footnote}>Swipe again to change a vote.</Text>
+          ) : swipeAgain ? (
+            <Text style={type.footnote}>New thoughts came up for voting.</Text>
+          ) : remaining.length === votableCards.length && mergedVotes.length > 0 ? (
             <Text style={type.footnote}>You’re voting on what the group already wrote.</Text>
           ) : null}
           <Text style={type.body}>
-            {Math.max(visibleCards.length - remaining.length, 0)} / {visibleCards.length} · {remaining.length} left
+            {Math.max(votableCards.length - remaining.length, 0)} / {votableCards.length} · {remaining.length} left
           </Text>
-          {voteEnds ? (
-            <Text style={voteTimedOut ? styles.closed : type.footnote}>
-              {voteTimedOut ? 'Time’s up — wrapping up votes…' : formatVoteDeadline(voteEnds)}
-            </Text>
+          {voteEnds ? <CountdownPill endsAt={voteEnds} /> : null}
+          {voteTimedOut ? (
+            <Text style={styles.closed}>Time’s up — wrapping up votes…</Text>
           ) : null}
           <ParticipationStats
             participants={participants}
@@ -185,6 +243,11 @@ export default function SwipeCardScreen() {
             showVotes
             showShare={false}
           />
+          {room?.status === 'lobby' && votingOpen ? (
+            <Pressable onPress={() => router.push(`/lobby/${code}`)} accessibilityRole="button">
+              <Text style={controls.ghostText}>Share another thought</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         <View style={styles.deck}>
@@ -195,8 +258,21 @@ export default function SwipeCardScreen() {
             </View>
           ) : top ? (
             <>
-              {next ? <SwipeCard card={next} stacked mine={cardIsMine(next)} onVote={() => {}} /> : null}
-              <SwipeCard card={top} mine={cardIsMine(top)} onVote={(c) => void vote(top.id, c, session.seat.id)} />
+              {next ? (
+                <SwipeCard
+                  card={next}
+                  stacked
+                  mine={cardIsMine(next)}
+                  priorChoice={reviewVotes ? choiceForSeat(mergedVotes, session.seat.id, next.id) : undefined}
+                  onVote={() => {}}
+                />
+              ) : null}
+              <SwipeCard
+                card={top}
+                mine={cardIsMine(top)}
+                priorChoice={reviewVotes ? priorChoice : undefined}
+                onVote={(c) => void vote(top.id, c, session.seat.id)}
+              />
             </>
           ) : (
             <View style={styles.empty}>
@@ -204,13 +280,13 @@ export default function SwipeCardScreen() {
               <Text style={type.body}>
                 {allVoted || voteTimedOut
                   ? 'Everyone in so far has voted.'
-                  : 'This seat is done. Switch seat to keep voting as someone else, or peek at early results.'}
+                  : 'This seat is caught up. Early results are next.'}
               </Text>
               {votingOpen ? (
                 <Button
                   variant="secondary"
-                  label={allVoted ? 'See results' : 'See early results'}
-                  onPress={() => router.push(`/summary/${code}`)}
+                  label="See early results"
+                  onPress={() => router.replace(`/summary/${code}`)}
                 />
               ) : null}
             </View>

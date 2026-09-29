@@ -1,4 +1,4 @@
-import { entryBelongsToSeat, seatEntryCount, seatsThatShared, thoughtCount } from './entries';
+import { entryBelongsToSeat, seatEntryCount, seatsThatShared, sharingSeatCount, thoughtCount, votableCardIdsForSeat, votingUnlocked } from './entries';
 import type { Entry, Seat } from '@/types/room';
 
 function assert(cond: unknown, msg: string) {
@@ -23,5 +23,19 @@ assert(entryBelongsToSeat(entries[2]!, guest), 'legacy entries still belong to t
 assert(seatEntryCount(entries, ada) !== 2, 'uid-global counts are not used');
 assert(thoughtCount(entries) === 3, 'thought count comes from the live thought list');
 assert(thoughtCount([...entries, { id: 'e4', authorId: 'u1', text: '   ' }]) === 3, 'blank thoughts are not counted');
+assert(sharingSeatCount(entries) === 3, 'sharing count is unique seats, not thought count');
+assert(!votingUnlocked(entries.slice(0, 1)), 'one seat cannot open voting');
+assert(votingUnlocked(entries.slice(0, 2)), 'two seats with thoughts open voting');
+assert(
+  votableCardIdsForSeat(
+    [
+      { id: 'e1', sourceEntryIds: ['e1'] },
+      { id: 'e2', sourceEntryIds: ['e2'] },
+    ],
+    entries,
+    's1',
+  ).join(',') === 'e2',
+  'you do not vote on your own thought',
+);
 
 console.log('entry tests ok');

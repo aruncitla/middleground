@@ -17,3 +17,36 @@ export function seatsThatShared(seats: Seat[], entries: Entry[]) {
 export function thoughtCount(entries: Pick<Entry, 'text'>[]) {
   return entries.filter((entry) => entry.text.trim().length > 0).length;
 }
+
+export const VOTE_UNLOCK_SEATS = 2;
+
+export function sharingSeatCount(entries: Pick<Entry, 'authorId' | 'seatId' | 'text'>[]) {
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.text.trim()) continue;
+    ids.add(entry.seatId || entry.authorId);
+  }
+  return ids.size;
+}
+
+export function votingUnlocked(entries: Pick<Entry, 'authorId' | 'seatId' | 'text'>[]) {
+  return sharingSeatCount(entries) >= VOTE_UNLOCK_SEATS;
+}
+
+export function ownEntryIdsForSeat(entries: Entry[], seatId: string | null) {
+  if (!seatId) return new Set<string>();
+  return new Set(entries.filter((entry) => entryBelongsToSeat(entry, { id: seatId })).map((entry) => entry.id));
+}
+
+export function cardOwnedBySeat(card: { sourceEntryIds?: string[] }, ownEntryIds: Set<string>) {
+  return Boolean(card.sourceEntryIds?.some((id) => ownEntryIds.has(id)));
+}
+
+export function votableCardIdsForSeat(
+  cards: { id: string; sourceEntryIds?: string[] }[],
+  entries: Entry[],
+  seatId: string | null,
+) {
+  const own = ownEntryIdsForSeat(entries, seatId);
+  return cards.filter((card) => !cardOwnedBySeat(card, own)).map((card) => card.id);
+}

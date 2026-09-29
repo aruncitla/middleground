@@ -98,3 +98,10 @@ export function allSeatsCompletedDeck(rosterIds: string[], votes: Vote[], cardId
 export function cardVotingComplete(votes: Vote[], rosterIds: string[], cardId: string) {
   return rosterIds.length > 0 && rosterIds.every((id) => seatVotedOnCard(votes, id, cardId));
 }
+
+/** Where this seat should be while voting is still open. */
+export function voteScreenForSeat(opts: { leftover: number; hasStarted: boolean; again: boolean }) {
+  if (opts.again && opts.leftover > 0) return 'swipe' as const;
+  if (!opts.hasStarted && opts.leftover > 0) return 'swipe' as const;
+  return 'summary' as const;
+}

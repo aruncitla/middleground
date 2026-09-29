@@ -48,17 +48,15 @@ export function useRoom(code: string | undefined) {
     return subscribeSeats(container, setSeats);
   }, [container]);
 
-  const pastLobby = room?.status === 'swiping' || room?.status === 'summary' || room?.status === 'synthesizing';
-
   useEffect(() => {
-    if (!code || !pastLobby) {
+    if (!code) {
       setCards([]);
       setVotes([]);
       return;
     }
     const unsubs = [subscribeCards(code, setCards), subscribeVotes(code, setVotes)];
     return () => unsubs.forEach((u) => u());
-  }, [code, pastLobby]);
+  }, [code]);
 
   const me = useMemo(
     () => (uid: string | undefined) => participants.find((p) => p.id === uid) ?? null,

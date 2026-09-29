@@ -1,6 +1,6 @@
 export type RoomStatus = 'lobby' | 'synthesizing' | 'swiping' | 'summary';
 export type CloseReason = 'manual' | 'timeout';
-export type CloseWindowId = '1h' | '1d';
+export type CloseWindowId = '1h' | '24h' | '3d' | '7d';
 export type RoomKind = 'group' | 'topic' | 'subtopic';
 export type TopicMode = 'debate' | 'hot-takes' | 'bracket' | 'predictions';
 

@@ -19,9 +19,10 @@ type Props = {
   stacked?: boolean;
   onVote: (choice: 'agree' | 'disagree') => void;
   mine?: boolean;
+  priorChoice?: 'agree' | 'disagree';
 };
 
-export function SwipeCard({ card, stacked, onVote, mine }: Props) {
+export function SwipeCard({ card, stacked, onVote, mine, priorChoice }: Props) {
   const { width: screenW } = useWindowDimensions();
   const x = useSharedValue(0);
   const y = useSharedValue(0);
@@ -132,8 +133,13 @@ export function SwipeCard({ card, stacked, onVote, mine }: Props) {
           style,
         ]}
       >
-        {mine ? <Text style={styles.note}>Your thought is on this card</Text> : null}
-        {merged ? (
+        {priorChoice ? (
+          <Text style={styles.note}>
+            You voted {priorChoice === 'agree' ? 'yes' : 'no'} — swipe to change
+          </Text>
+        ) : mine ? (
+          <Text style={styles.note}>Your thought is on this card</Text>
+        ) : merged ? (
           <Text style={styles.note}>
             {card.sourceCount ?? card.sourceEntryIds?.length} similar thoughts merged
           </Text>

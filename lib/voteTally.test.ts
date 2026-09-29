@@ -8,6 +8,7 @@ import {
   seatsStartedCount,
   sortCards,
   voteKey,
+  voteScreenForSeat,
   withVoteTallies,
 } from './voteTally';
 import type { Card, Vote } from '@/types/room';
@@ -51,5 +52,11 @@ assert(!cardVotingComplete([adaA], ['sAAA', 'sBBB'], 'c1'), 'agreement labels wa
 assert(cardVotingComplete([adaA, adaB], ['sAAA', 'sBBB'], 'c1'), 'a complete card can show an agreement label');
 assert(seatsStartedCount(['sAAA', 'sBBB'], [adaA], deck) === 1, 'header counts a seat after its first vote');
 assert(seatsFinishedCount(['sAAA', 'sBBB'], [adaA], deck) === 0, 'finished stays 0 until the deck is done');
+
+assert(voteScreenForSeat({ leftover: 4, hasStarted: false, again: false }) === 'swipe', 'a new seat swipes leftover cards');
+assert(voteScreenForSeat({ leftover: 0, hasStarted: true, again: false }) === 'summary', 'a finished seat sees early results');
+assert(voteScreenForSeat({ leftover: 2, hasStarted: true, again: false }) === 'summary', 'new cards wait on early results until they swipe again');
+assert(voteScreenForSeat({ leftover: 2, hasStarted: true, again: true }) === 'swipe', 'swipe again opens leftover cards');
+assert(voteScreenForSeat({ leftover: 0, hasStarted: true, again: true }) === 'summary', 'catching up after swipe-again returns to results');
 
 console.log('voteTally tests ok');
