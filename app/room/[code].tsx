@@ -154,7 +154,6 @@ export default function RoomHomeScreen() {
                 </>
               )}
               <Text style={styles.code}>{saved?.code}</Text>
-              {saved?.code ? <CopyButton value={saved.code} /> : null}
               {saved?.created ? <Text style={type.footnote}>Created {formatDate(saved.created)}</Text> : null}
               {session.seat ? (
                 <Text style={type.footnote}>
@@ -188,6 +187,13 @@ export default function RoomHomeScreen() {
                   <Text style={styles.shareHint}>
                     Room invite — code and roster. Different from a topic’s verdict card.
                   </Text>
+                  <Pressable
+                    disabled={sharing}
+                    onPress={() => setShowInvite(false)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={controls.ghostText}>Hide invite</Text>
+                  </Pressable>
                 </>
               ) : null}
 

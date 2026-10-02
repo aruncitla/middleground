@@ -13,7 +13,7 @@ import { CopyButton } from '@/components/CopyButton';
 import { Screen } from '@/components/Screen';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useSavedRooms } from '@/hooks/usePastRooms';
-import { DEMO_ROOM_CODE } from '@/lib/app';
+import { DEMO_ROOM_CODE, FEEDBACK_ROOM_CODE } from '@/lib/app';
 import { notify } from '@/lib/notify';
 import { peekRoom } from '@/lib/roomService';
 import { pathForRoom } from '@/lib/roomPath';
@@ -78,6 +78,9 @@ export default function HomeScreen() {
           />
           <Pressable onPress={() => router.push(`/summary/${DEMO_ROOM_CODE}`)} accessibilityRole="button">
             <Text style={controls.ghostText}>See a live debate</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push(`/room/${FEEDBACK_ROOM_CODE}`)} accessibilityRole="button">
+            <Text style={controls.ghostText}>Give feedback</Text>
           </Pressable>
         </View>
 

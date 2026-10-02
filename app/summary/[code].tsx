@@ -12,6 +12,7 @@ import { Button } from '@/components/Button';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { CountdownPill } from '@/components/CountdownPill';
+import { FEEDBACK_ROOM_CODE, FEEDBACK_TOPIC_CODE } from '@/lib/app';
 import { votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
 import { isGenericFillerText } from '@/lib/cardQuality';
 import { liveDeadline } from '@/lib/formatEnds';
@@ -323,6 +324,15 @@ export default function SummaryScreen() {
               Opens WhatsApp and other chats with a link to the app. On phones it can attach the card image too.
             </Text>
           </>
+        ) : null}
+
+        {code !== FEEDBACK_TOPIC_CODE && container !== FEEDBACK_ROOM_CODE ? (
+          <Pressable
+            onPress={() => router.push(`/lobby/${FEEDBACK_TOPIC_CODE}`)}
+            accessibilityRole="button"
+          >
+            <Text style={controls.ghostText}>Help us improve</Text>
+          </Pressable>
         ) : null}
 
         {isFollowUp ? (
