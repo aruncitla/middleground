@@ -1,12 +1,12 @@
-import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
+import { CopyButton } from '@/components/CopyButton';
 import { RoomInviteCard } from '@/components/RoomInviteCard';
 import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
+import { TopicCard } from '@/components/TopicCard';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { roomShareUrl } from '@/lib/app';
 import { notify } from '@/lib/notify';
@@ -34,7 +34,6 @@ export default function RoomHomeScreen() {
   const { user, loading, error } = useGuestAuth();
   const [saved, setSaved] = useState<SavedRoom | null>(null);
   const [ready, setReady] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
@@ -68,13 +67,6 @@ export default function RoomHomeScreen() {
   const isHost = Boolean(user && saved && user.uid === saved.hostId);
   const shareUrl = saved ? roomShareUrl(saved.code) : '';
   const container = saved?.code ?? code;
-
-  const onCopyLink = async () => {
-    if (!shareUrl) return;
-    await Clipboard.setStringAsync(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
-  };
 
   const onShareInvite = async () => {
     if (!saved) return;
@@ -127,7 +119,6 @@ export default function RoomHomeScreen() {
           const avatar = session.seat ? avatarById(session.seat.avatarId) : null;
           return (
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-              <BrandMark />
               <Pressable onPress={() => router.replace('/')} accessibilityRole="button">
                 <Text style={controls.ghostText}>All rooms</Text>
               </Pressable>
@@ -139,8 +130,9 @@ export default function RoomHomeScreen() {
                     onChangeText={setNameDraft}
                     style={controls.input}
                     placeholder="Friday crew"
-                    placeholderTextColor={colors.muted}
+                    placeholderTextColor={colors.faint}
                     maxLength={80}
+                    {...({ dataSet: { mgInput: true } } as object)}
                   />
                   <Button label="Save name" onPress={() => void onRename()} />
                   <Pressable
@@ -161,9 +153,8 @@ export default function RoomHomeScreen() {
                   </Pressable>
                 </>
               )}
-              <Pressable onPress={() => void onCopyLink()} accessibilityRole="button">
-                <Text style={styles.code}>{saved?.code}</Text>
-              </Pressable>
+              <Text style={styles.code}>{saved?.code}</Text>
+              {saved?.code ? <CopyButton value={saved.code} /> : null}
               {saved?.created ? <Text style={type.footnote}>Created {formatDate(saved.created)}</Text> : null}
               {session.seat ? (
                 <Text style={type.footnote}>
@@ -177,9 +168,7 @@ export default function RoomHomeScreen() {
               <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
                 <Text style={controls.ghostText}>Switch seat</Text>
               </Pressable>
-              <Pressable onPress={() => void onCopyLink()} accessibilityRole="button">
-                <Text style={controls.ghostText}>{copied ? 'Link copied' : 'Copy room link'}</Text>
-              </Pressable>
+              {shareUrl ? <CopyButton value={shareUrl} label="Copy room link" /> : null}
               <Button
                 label={sharing ? 'Preparing…' : 'Share invite card'}
                 onPress={() => void onShareInvite()}
@@ -276,7 +265,7 @@ function VerdictCard({
 }) {
   const live = topicIsLive(row.status);
   return (
-    <View style={[styles.card, highlight && styles.cardOn]}>
+    <TopicCard style={highlight ? styles.cardOn : undefined}>
       <Pressable onPress={onPress} accessibilityRole="button" style={styles.cardMain}>
         {live ? <Text style={styles.live}>Live</Text> : null}
         <Text style={styles.prompt}>{row.prompt}</Text>
@@ -299,14 +288,14 @@ function VerdictCard({
           <Text style={type.footnote}>{sub.verdict}</Text>
         </Pressable>
       ))}
-    </View>
+    </TopicCard>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 22, paddingBottom: 48, gap: 10 },
+  page: { paddingBottom: 48, gap: 10 },
   rename: { gap: 8 },
-  code: { ...type.kicker, fontSize: 18, letterSpacing: 2, color: colors.ink },
+  code: { ...type.code },
   shareHint: { ...type.footnote, maxWidth: 420, alignSelf: 'center' },
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   stat: {

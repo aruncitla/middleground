@@ -3,6 +3,7 @@ import Svg, { ClipPath, Defs, G, Path, RadialGradient, Rect, Stop } from 'react-
 
 type Props = {
   size?: number;
+  height?: number;
   mono?: boolean;
 };
 
@@ -11,17 +12,18 @@ const VB_H = 32;
 const LEFT = 'M15 3 L33 3 A13 13 0 0 1 33 29 L15 29 A13 13 0 0 1 15 3 Z';
 const RIGHT = 'M43 3 L61 3 A13 13 0 0 1 61 29 L43 29 A13 13 0 0 1 43 3 Z';
 
-export function LoopMark({ size = 52, mono = false }: Props) {
+export function LoopMark({ size = 52, height, mono = false }: Props) {
   const uid = useId().replace(/:/g, '');
   const glow = `mg-glow-${uid}`;
   const clipL = `mg-l-${uid}`;
   const clipR = `mg-r-${uid}`;
-  const height = Math.round((size * VB_H) / VB_W);
+  const w = height != null ? Math.round((height * VB_W) / VB_H) : size;
+  const h = height ?? Math.round((size * VB_H) / VB_W);
   const stroke = mono ? '#FFFFFF' : undefined;
   return (
     <Svg
-      width={size}
-      height={height}
+      width={w}
+      height={h}
       viewBox={`0 0 ${VB_W} ${VB_H}`}
       fill="none"
       accessibilityLabel="Middleground"

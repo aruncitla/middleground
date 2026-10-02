@@ -8,7 +8,7 @@ import {
   type PromptPack,
   type TopicMode,
 } from '@/lib/promptPacks';
-import { colors, type } from '@/lib/theme';
+import { colors, controls, type } from '@/lib/theme';
 
 const MODE_LABEL: Record<TopicMode, string> = {
   debate: 'Debate',
@@ -123,10 +123,8 @@ const styles = StyleSheet.create({
   banner: { ...type.kicker, color: colors.accentHover },
   pastLabel: { marginTop: 8 },
   deck: {
-    backgroundColor: colors.card,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...controls.panel,
+    padding: 0,
     overflow: 'hidden',
   },
   deckOpen: { borderColor: colors.accentSoft },

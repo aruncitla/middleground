@@ -1,10 +1,9 @@
 import { forwardRef } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { BrandMark } from '@/components/BrandMark';
 import { VoteScale } from '@/components/VoteScale';
 import { APP_HOST, APP_URL } from '@/lib/app';
-import { colors, type } from '@/lib/theme';
+import { colors, controls, type } from '@/lib/theme';
 import { discussionScore } from '@/lib/voteChoice';
 import type { Card, Vote } from '@/types/room';
 
@@ -80,66 +79,57 @@ export function phraseFromCardText(text: string) {
   return clipPhrase(sentence);
 }
 
+const SHARE_THOUGHTS = 3;
+
 export const ConsensusSummaryCard = forwardRef<View, ConsensusSummaryCardProps>(function ConsensusSummaryCard(
   { topic, cards = [], votes = [], participantCount, elapsedLabel, score },
   ref,
 ) {
   const discussion = score ?? discussionScore(cards);
+  const shown = cards.slice(0, SHARE_THOUGHTS);
+  const extra = Math.max(0, cards.length - shown.length);
   return (
     <View ref={ref} collapsable={false} style={styles.frame}>
-      <LinearGradient
-        colors={['#09090B', '#111113', '#18181b', '#09090B']}
-        locations={[0, 0.35, 0.72, 1]}
-        start={{ x: 0.05, y: 0 }}
-        end={{ x: 0.95, y: 1 }}
-        style={styles.gradient}
-      >
-        <BrandMark size="sm" toHome={false} fromMark />
-        <Text style={styles.title} numberOfLines={3}>
-          {topic}
-        </Text>
-        <View style={styles.scoreWrap}>
-          <Text style={styles.scoreKicker}>Discussion score</Text>
-          <Text style={styles.score}>{discussion}</Text>
-        </View>
-        <View style={styles.scales}>
-          {cards.slice(0, 6).map((card) => (
-            <VoteScale key={card.id} card={card} votes={votes} compact />
-          ))}
-        </View>
-        <View style={styles.footer}>
-          <Pressable onPress={() => void Linking.openURL(APP_URL)} accessibilityRole="link">
-            <Text style={styles.appLink}>{APP_HOST}</Text>
-          </Pressable>
-          <Text style={styles.meta}>
-            {[elapsedLabel, participantCount != null ? `${participantCount} people in` : null]
-              .filter(Boolean)
-              .join(' · ')}
+      <BrandMark size="sm" toHome={false} fromMark />
+      <Text style={styles.title} numberOfLines={3}>
+        {topic}
+      </Text>
+      <View style={styles.scoreWrap}>
+        <Text style={styles.scoreKicker}>Discussion score</Text>
+        <Text style={styles.score}>{discussion}</Text>
+      </View>
+      <View style={styles.scales}>
+        {shown.map((card) => (
+          <VoteScale key={card.id} card={card} votes={votes} compact />
+        ))}
+        {extra > 0 ? (
+          <Text style={styles.more}>
+            + {extra} {extra === 1 ? 'thought' : 'thoughts'}
           </Text>
-        </View>
-      </LinearGradient>
+        ) : null}
+      </View>
+      <View style={styles.footer}>
+        <Pressable onPress={() => void Linking.openURL(APP_URL)} accessibilityRole="link">
+          <Text style={styles.appLink}>{APP_HOST}</Text>
+        </Pressable>
+        <Text style={styles.meta}>
+          {[elapsedLabel, participantCount != null ? `${participantCount} people in` : null]
+            .filter(Boolean)
+            .join(' · ')}
+        </Text>
+      </View>
     </View>
   );
 });
 
 const styles = StyleSheet.create({
   frame: {
+    ...controls.panel,
     width: '100%',
     maxWidth: 420,
     alignSelf: 'center',
-    minHeight: 420,
-    borderRadius: 16,
+    minHeight: 280,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-    boxShadow: '0 0 40px rgba(245, 158, 11, 0.18)',
-  },
-  gradient: {
-    flex: 1,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 14,
-    gap: 10,
   },
   title: {
     ...type.title,
@@ -151,9 +141,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    backgroundColor: colors.surface3,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.28)',
+    borderColor: colors.line,
   },
   scoreKicker: { ...type.kicker, color: colors.amber },
   score: {
@@ -162,10 +152,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     fontWeight: '700',
     letterSpacing: -1.4,
-    textShadowColor: 'rgba(245, 158, 11, 0.55)',
-    textShadowRadius: 18,
   },
-  scales: { gap: 14, flex: 1 },
+  scales: { gap: 12 },
+  more: { ...type.footnote, color: colors.muted, marginTop: 2 },
   footer: {
     marginTop: 8,
     flexDirection: 'row',

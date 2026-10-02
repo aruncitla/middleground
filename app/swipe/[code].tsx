@@ -1,7 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { CountdownPill } from '@/components/CountdownPill';
 import { MaybeShelf } from '@/components/MaybeShelf';
@@ -11,6 +10,7 @@ import { RoomStageBar } from '@/components/RoomStageBar';
 import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
 import { SwipeCard } from '@/components/SwipeCard';
+import { TopicCard } from '@/components/TopicCard';
 import { VoteButtons } from '@/components/VoteButtons';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { cardOwnedBySeat, ownEntryIdsForSeat, votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
@@ -223,15 +223,6 @@ export default function SwipeCardScreen() {
     }
   };
 
-  const tint =
-    drag.y > 40 && Math.abs(drag.y) > Math.abs(drag.x)
-      ? 'maybe'
-      : drag.x > 24
-        ? 'agree'
-        : drag.x < -24
-          ? 'disagree'
-          : null;
-
   return (
     <Screen loading={authLoading || !ready} error={authError}>
       <SeatGate
@@ -260,7 +251,6 @@ export default function SwipeCardScreen() {
             return choiceForSeat(mergedVotes, session.seat?.id, card.id) === 'maybe';
           });
           const top = remaining[0];
-          const next = remaining[1];
           const priorChoice = top ? choiceForSeat(mergedVotes, session.seat?.id, top.id) : undefined;
           const needIdentity = () => session.setSwitching(true);
           const onPick = (choice: VoteChoice) => {
@@ -273,9 +263,7 @@ export default function SwipeCardScreen() {
           };
           return (
       <View style={styles.page}>
-        <View pointerEvents="none" style={[styles.tint, tint === 'disagree' && styles.tintCoral, tint === 'agree' && styles.tintTeal, tint === 'maybe' && styles.tintMaybe]} />
         <View style={styles.header}>
-          <BrandMark size="sm" />
           <RoomStageBar stage="vote" />
           {session.seat ? (
             <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
@@ -288,9 +276,11 @@ export default function SwipeCardScreen() {
               <Text style={controls.ghostText}>Add a name to vote</Text>
             </Pressable>
           )}
-          <Text style={type.title} numberOfLines={2}>
-            {room?.topic}
-          </Text>
+          <TopicCard>
+            <Text style={type.title} numberOfLines={2}>
+              {room?.topic}
+            </Text>
+          </TopicCard>
           <ParticipationStats
             participants={participants}
             seats={session.seats}
@@ -311,20 +301,20 @@ export default function SwipeCardScreen() {
             </View>
           ) : top ? (
             <>
-              {next ? (
-                <SwipeCard
-                  card={next}
-                  stacked
-                  mine={cardIsMine(next)}
-                  priorChoice={reviewVotes ? choiceForSeat(mergedVotes, session.seat?.id, next.id) : undefined}
-                  onVote={() => {}}
-                />
-              ) : null}
+              <View pointerEvents="none" style={styles.stack2} />
+              <View pointerEvents="none" style={styles.stack1} />
               <SwipeCard
                 card={top}
                 mine={cardIsMine(top)}
+                author={
+                  cardIsMine(top)
+                    ? session.seat?.displayName
+                    : (top.sourceCount ?? top.sourceEntryIds?.length ?? 0) > 1
+                      ? `${top.sourceCount ?? top.sourceEntryIds?.length} people`
+                      : 'From the group'
+                }
                 priorChoice={reviewVotes ? priorChoice : undefined}
-                onDrag={setDrag}
+                onDrag={(dx, dy) => setDrag({ x: dx, y: dy })}
                 onVote={(c) => onPick(c)}
               />
             </>
@@ -349,12 +339,6 @@ export default function SwipeCardScreen() {
           )}
         </View>
 
-        {top && votingOpen ? (
-          <View style={styles.footer}>
-            <VoteButtons onChoice={onPick} current={priorChoice} />
-          </View>
-        ) : null}
-
         {room?.status === 'lobby' && votingOpen ? (
           <View style={styles.composer}>
             {composerOpen ? (
@@ -363,9 +347,10 @@ export default function SwipeCardScreen() {
                   value={draft}
                   onChangeText={setDraft}
                   placeholder="Add your thought"
-                  placeholderTextColor={colors.muted}
+                  placeholderTextColor={colors.faint}
                   style={[controls.input, styles.area]}
                   multiline
+                  {...({ dataSet: { mgInput: true } } as object)}
                 />
                 <Button
                   disabled={submitting || !draft.trim()}
@@ -396,6 +381,12 @@ export default function SwipeCardScreen() {
             style={styles.results}
           />
         ) : null}
+
+        {top && votingOpen ? (
+          <View style={styles.footer} {...({ dataSet: { mgVoteBar: true } } as object)}>
+            <VoteButtons onChoice={onPick} current={priorChoice} />
+          </View>
+        ) : null}
       </View>
           );
         }}
@@ -405,22 +396,51 @@ export default function SwipeCardScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, paddingTop: 8, paddingBottom: 0 },
-  tint: { ...StyleSheet.absoluteFillObject, opacity: 0 },
-  tintCoral: { backgroundColor: 'rgba(255, 107, 107, 0.16)', opacity: 1 },
-  tintTeal: { backgroundColor: 'rgba(45, 212, 191, 0.16)', opacity: 1 },
-  tintMaybe: { backgroundColor: 'rgba(212, 212, 216, 0.1)', opacity: 1 },
-  header: { paddingHorizontal: 20, gap: 4, flexShrink: 0 },
-  deck: { flex: 1, minHeight: 200, marginTop: 4 },
+  page: { flex: 1, paddingTop: 4, paddingBottom: 0 },
+  header: { gap: 6, flexShrink: 0 },
+  deck: { flex: 1, minHeight: 300, marginTop: 8, position: 'relative' },
+  stack1: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 280,
+    borderRadius: 24,
+    backgroundColor: '#101014',
+    opacity: 0.55,
+    transform: [{ translateY: 10 }, { scale: 0.96 }],
+    zIndex: 1,
+  },
+  stack2: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 280,
+    borderRadius: 24,
+    backgroundColor: '#0C0C0F',
+    opacity: 0.3,
+    transform: [{ translateY: 20 }, { scale: 0.92 }],
+    zIndex: 0,
+  },
   empty: {
-    marginHorizontal: 20,
     ...controls.panel,
     minHeight: 180,
     justifyContent: 'center',
     gap: 12,
   },
-  footer: { flexShrink: 0, paddingTop: 8, paddingBottom: 4, backgroundColor: colors.bg },
-  composer: { paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  footer: {
+    position: 'sticky' as 'relative',
+    bottom: 0,
+    zIndex: 20,
+    backgroundColor: 'rgba(9,9,11,.96)',
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  composer: { paddingVertical: 8, gap: 8 },
   area: { minHeight: 72, textAlignVertical: 'top' },
-  results: { marginHorizontal: 20, marginTop: 12, marginBottom: 12 },
+  results: { marginTop: 12, marginBottom: 12 },
 });

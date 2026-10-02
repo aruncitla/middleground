@@ -11,7 +11,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { voteLockHaptic } from '@/lib/haptic';
 import { isExampleCard } from '@/lib/starterCards';
-import { colors } from '@/lib/theme';
+import { colors, shadows } from '@/lib/theme';
 import {
   armedSide,
   choiceFromSwipe,
@@ -19,25 +19,25 @@ import {
   stampOpacity,
   swipeThresholdForWidth,
 } from '@/lib/swipeVote';
-import { VOTE_STAMPS, type VoteChoice } from '@/lib/voteChoice';
+import { VOTE_LABELS, VOTE_STAMPS, type VoteChoice } from '@/lib/voteChoice';
 import type { Card } from '@/types/room';
 
 type Props = {
   card: Card;
-  stacked?: boolean;
   onVote: (choice: VoteChoice) => void;
   mine?: boolean;
+  author?: string;
   priorChoice?: VoteChoice;
   onDrag?: (dx: number, dy: number) => void;
 };
 
-export function SwipeCard({ card, stacked, onVote, mine, priorChoice, onDrag }: Props) {
+export function SwipeCard({ card, onVote, mine, author, priorChoice, onDrag }: Props) {
   const { width: screenW, height: screenH } = useWindowDimensions();
   const x = useSharedValue(0);
   const y = useSharedValue(0);
   const originX = useSharedValue(0);
   const originY = useSharedValue(0);
-  const cardW = useSharedValue(Math.max(240, screenW - 32));
+  const cardW = useSharedValue(Math.max(240, screenW - 40));
   const cardH = useSharedValue(280);
   const armed = useSharedValue(0);
   const committed = useSharedValue(0);
@@ -58,7 +58,6 @@ export function SwipeCard({ card, stacked, onVote, mine, priorChoice, onDrag }: 
   };
 
   const pan = Gesture.Pan()
-    .enabled(!stacked)
     .maxPointers(1)
     .minDistance(0)
     .shouldCancelWhenOutside(false)
@@ -118,12 +117,7 @@ export function SwipeCard({ card, stacked, onVote, mine, priorChoice, onDrag }: 
   const style = useAnimatedStyle(() => {
     const rotate = interpolate(x.value, [-cardW.value, 0, cardW.value], [-14, 0, 14]);
     return {
-      transform: [
-        { translateX: x.value },
-        { translateY: stacked ? 10 : y.value },
-        { rotate: `${rotate}deg` },
-        { scale: stacked ? 0.96 : 1 },
-      ],
+      transform: [{ translateX: x.value }, { translateY: y.value }, { rotate: `${rotate}deg` }],
     };
   });
 
@@ -145,6 +139,7 @@ export function SwipeCard({ card, stacked, onVote, mine, priorChoice, onDrag }: 
 
   const merged = (card.sourceCount ?? card.sourceEntryIds?.length ?? 0) > 1;
   const example = isExampleCard(card);
+  const authorLine = author ?? (mine ? 'You' : merged ? `${card.sourceCount ?? card.sourceEntryIds?.length} people` : 'From the group');
 
   return (
     <GestureDetector gesture={pan}>
@@ -155,19 +150,23 @@ export function SwipeCard({ card, stacked, onVote, mine, priorChoice, onDrag }: 
         }}
         style={[
           styles.card,
-          stacked ? styles.back : styles.front,
           Platform.OS === 'web'
-            ? { touchAction: 'none', userSelect: 'none', cursor: stacked ? 'default' : 'grab' }
+            ? ({
+                backgroundImage: 'linear-gradient(180deg, #202027, #131318)',
+                touchAction: 'none',
+                userSelect: 'none',
+                cursor: 'grab',
+              } as object)
             : null,
           style,
         ]}
       >
+        <Text style={styles.kicker}>THOUGHT</Text>
         {example ? (
           <Text style={styles.note}>Example · doesn’t count toward the verdict</Text>
         ) : priorChoice ? (
           <Text style={styles.note}>
-            You voted {priorChoice === 'agree' ? 'works for me' : priorChoice === 'maybe' ? 'maybe' : 'not for me'} — swipe
-            to change
+            You voted {VOTE_LABELS[priorChoice]} — swipe to change
           </Text>
         ) : mine ? (
           <Text style={styles.note}>Your thought is on this card</Text>
@@ -177,6 +176,7 @@ export function SwipeCard({ card, stacked, onVote, mine, priorChoice, onDrag }: 
           </Text>
         ) : null}
         <Text style={styles.body}>{card.text}</Text>
+        <Text style={styles.author}>{authorLine}</Text>
         <Animated.Text pointerEvents="none" style={[styles.stamp, styles.yes, yesStyle]}>
           {VOTE_STAMPS.agree}
         </Animated.Text>
@@ -186,7 +186,6 @@ export function SwipeCard({ card, stacked, onVote, mine, priorChoice, onDrag }: 
         <Animated.Text pointerEvents="none" style={[styles.stamp, styles.maybe, maybeStyle]}>
           {VOTE_STAMPS.maybe}
         </Animated.Text>
-        {stacked ? <View pointerEvents="none" style={styles.lock} /> : null}
       </Animated.View>
     </GestureDetector>
   );
@@ -194,89 +193,88 @@ export function SwipeCard({ card, stacked, onVote, mine, priorChoice, onDrag }: 
 
 const styles = StyleSheet.create({
   card: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    top: 8,
-    bottom: 8,
-    backgroundColor: colors.cardSolid,
-    borderRadius: 16,
+    minHeight: 280,
     padding: 24,
+    borderRadius: 24,
+    backgroundColor: '#202027',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,.10)',
+    boxShadow: shadows.thought,
     justifyContent: 'center',
     overflow: 'hidden',
-    backdropFilter: 'blur(24px)',
+    zIndex: 3,
   },
-  front: {
-    zIndex: 2,
-    boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
-  },
-  back: {
-    zIndex: 1,
-    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+  kicker: {
+    position: 'absolute',
+    top: 24,
+    left: 24,
+    fontFamily: 'Inter',
+    fontWeight: '700',
+    fontSize: 11,
+    letterSpacing: 1.32,
+    color: colors.faint,
   },
   note: {
     position: 'absolute',
-    top: 18,
+    top: 44,
     left: 24,
     right: 24,
-    color: colors.muted,
+    color: colors.faint,
     fontFamily: 'Inter',
     fontWeight: '500',
-    fontSize: 13,
+    fontSize: 12,
   },
   body: {
     color: colors.ink,
     fontSize: 24,
     fontFamily: 'Inter',
-    fontWeight: '600',
-    letterSpacing: -0.6,
-    lineHeight: 32,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    lineHeight: 32.4,
+    marginTop: 28,
+    marginBottom: 28,
+  },
+  author: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 24,
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: colors.muted,
   },
   stamp: {
     position: 'absolute',
     top: 28,
-    fontSize: 22,
+    fontSize: 12,
     fontFamily: 'Inter',
-    fontWeight: '700',
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
+    fontWeight: '800',
+    letterSpacing: 0.96,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 2,
+    overflow: 'hidden',
     zIndex: 4,
   },
   yes: {
     left: 16,
     color: colors.teal,
-    borderWidth: 3,
     borderColor: colors.teal,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    transform: [{ rotate: '-14deg' }],
   },
   nah: {
     right: 16,
     color: colors.coral,
-    borderWidth: 3,
     borderColor: colors.coral,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    transform: [{ rotate: '14deg' }],
   },
   maybe: {
     alignSelf: 'center',
     left: 48,
     right: 48,
     top: 'auto',
-    bottom: 28,
+    bottom: 52,
     textAlign: 'center',
-    color: colors.muted,
-    borderWidth: 3,
-    borderColor: colors.muted,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    color: colors.amber,
+    borderColor: colors.amber,
   },
-  lock: { ...StyleSheet.absoluteFillObject },
 });

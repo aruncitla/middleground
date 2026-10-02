@@ -34,8 +34,8 @@ export function MaybeShelf({ cards, onOpen }: Props) {
 const styles = StyleSheet.create({
   wrap: {
     borderTopWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: 'rgba(24,24,27,0.85)',
+    borderColor: colors.line,
+    backgroundColor: colors.bg,
     paddingTop: 8,
     paddingBottom: 6,
     gap: 6,

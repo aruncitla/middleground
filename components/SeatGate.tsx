@@ -177,8 +177,9 @@ export function SeatPicker({
         onChangeText={setName}
         placeholder="Your name"
         autoComplete="name"
-        placeholderTextColor={colors.muted}
+        placeholderTextColor={colors.faint}
         style={controls.input}
+        {...({ dataSet: { mgInput: true } } as object)}
       />
       <Text style={[type.label, styles.label]}>Emoji</Text>
       <View style={styles.avatars}>

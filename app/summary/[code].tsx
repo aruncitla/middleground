@@ -4,10 +4,10 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ConsensusSummaryCard } from '@/components/ConsensusSummaryCard';
 import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
+import { TopicCard } from '@/components/TopicCard';
 import { VoteScale } from '@/components/VoteScale';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
-import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
@@ -31,7 +31,7 @@ import {
   voteScreenForSeat,
   withVoteTallies,
 } from '@/lib/voteTally';
-import { discussionScore } from '@/lib/voteChoice';
+import { discussionScore, VOTE_LABELS } from '@/lib/voteChoice';
 import { colors, controls, type } from '@/lib/theme';
 import type { Card } from '@/types/room';
 
@@ -195,7 +195,6 @@ export default function SummaryScreen() {
           const seatId = session.seat?.id;
           return (
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-        <BrandMark size="sm" fromMark={!isEarly} />
         <RoomStageBar stage="results" />
         <Text style={type.kicker}>{isEarly ? 'Live verdict' : 'Verdict'}</Text>
         <Pressable
@@ -213,7 +212,9 @@ export default function SummaryScreen() {
             </Text>
           </Pressable>
         ) : null}
-        <Text style={type.title}>{room?.topic}</Text>
+        <TopicCard>
+          <Text style={type.title}>{room?.topic}</Text>
+        </TopicCard>
         <View style={styles.scoreWrap}>
           <Text style={styles.scoreKicker}>Discussion score</Text>
           <Text style={styles.score}>{hasVotes ? score : '—'}</Text>
@@ -331,11 +332,11 @@ export default function SummaryScreen() {
               {seatId ? (
                 <Text style={type.footnote}>
                   {choiceForSeat(mergedVotes, seatId, card.id) === 'agree'
-                    ? 'You voted works for me'
+                    ? `You voted ${VOTE_LABELS.agree}`
                     : choiceForSeat(mergedVotes, seatId, card.id) === 'disagree'
-                      ? 'You voted not for me'
+                      ? `You voted ${VOTE_LABELS.disagree}`
                       : choiceForSeat(mergedVotes, seatId, card.id) === 'maybe'
-                        ? 'You voted maybe'
+                        ? `You voted ${VOTE_LABELS.maybe}`
                         : 'You haven’t voted on this yet'}
                 </Text>
               ) : null}
@@ -378,7 +379,7 @@ export default function SummaryScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 20, paddingBottom: 48, gap: 10 },
+  page: { paddingBottom: 48, gap: 10 },
   section: { gap: 12, marginTop: 8 },
   card: {
     ...controls.panel,
@@ -399,8 +400,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     fontWeight: '700',
     letterSpacing: -1.6,
-    textShadowColor: 'rgba(245, 158, 11, 0.55)',
-    textShadowRadius: 18,
   },
   share: {
     maxWidth: 420,

@@ -1,7 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { PromptPacks } from '@/components/PromptPacks';
 import { Screen } from '@/components/Screen';
@@ -94,7 +93,6 @@ export default function NewTopicScreen() {
   return (
     <Screen loading={loading} error={error}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-        <BrandMark />
         <Pressable onPress={() => router.back()} accessibilityRole="button">
           <Text style={controls.ghostText}>{inRoom ? `Back to ${container}` : 'Back'}</Text>
         </Pressable>
@@ -116,8 +114,9 @@ export default function NewTopicScreen() {
           }}
           placeholder="Your name"
           autoComplete="name"
-          placeholderTextColor={colors.muted}
+          placeholderTextColor={colors.faint}
           style={controls.input}
+          {...({ dataSet: { mgInput: true } } as object)}
         />
 
         {inRoom ? null : (
@@ -130,9 +129,10 @@ export default function NewTopicScreen() {
                 if (formError) setFormError(null);
               }}
               placeholder="Friday crew"
-              placeholderTextColor={colors.muted}
+              placeholderTextColor={colors.faint}
               style={controls.input}
               maxLength={80}
+              {...({ dataSet: { mgInput: true } } as object)}
             />
             <Text style={type.footnote}>
               Required. Shown on the home list and invite. The topic stays the question you’re asking.
@@ -148,8 +148,9 @@ export default function NewTopicScreen() {
             value={topic}
             onChangeText={setTopic}
             placeholder="Where should we go on vacation?"
-            placeholderTextColor={colors.muted}
+            placeholderTextColor={colors.faint}
             style={controls.input}
+            {...({ dataSet: { mgInput: true } } as object)}
           />
           <Text style={[type.label, styles.label]}>Mode</Text>
           <View style={styles.row}>
@@ -192,7 +193,7 @@ export default function NewTopicScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 22, paddingBottom: 48, gap: 10 },
+  page: { paddingBottom: 48, gap: 10 },
   label: { marginTop: 4 },
   error: { ...type.body, color: colors.danger },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

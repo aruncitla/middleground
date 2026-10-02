@@ -1,4 +1,3 @@
-import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -9,8 +8,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
+import { CopyButton } from '@/components/CopyButton';
 import { Screen } from '@/components/Screen';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useSavedRooms } from '@/hooks/usePastRooms';
@@ -61,7 +60,6 @@ export default function HomeScreen() {
   return (
     <Screen loading={loading} error={error}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-        <BrandMark />
         <View style={styles.script}>
           <Text style={styles.scriptLine}>Share your thoughts.</Text>
           <Text style={styles.scriptLine}>Vote on what everyone shared.</Text>
@@ -88,16 +86,15 @@ export default function HomeScreen() {
           <TextInput
             value={code}
             onChangeText={(t) => setCode(t.toUpperCase())}
-            placeholder="K7M2QX"
+            placeholder="e.g. K7M2QX"
             autoCapitalize="characters"
             maxLength={6}
-            placeholderTextColor={colors.muted}
-            style={controls.input}
+            placeholderTextColor="rgba(250,250,249,0.28)"
+            style={[controls.input, code ? type.code : styles.codeHint]}
+            {...({ dataSet: { mgInput: 'code' } } as object)}
           />
           <Button disabled={busy} onPress={() => void onJoin()} variant="secondary" label="Join room" />
-          <Pressable onPress={() => void Clipboard.setStringAsync(code)} style={styles.ghost}>
-            <Text style={controls.ghostText}>Copy typed code</Text>
-          </Pressable>
+          <CopyButton value={code} />
         </View>
 
         <View style={controls.panel}>
@@ -130,18 +127,22 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 22, paddingBottom: 48, gap: 10 },
+  page: { paddingBottom: 48, gap: 12 },
   script: { gap: 2, marginBottom: 6 },
   scriptLine: { ...type.body, fontSize: 14, lineHeight: 20 },
-  ghost: { alignItems: 'center', paddingVertical: 6 },
   pastRow: {
-    backgroundColor: colors.card,
-    borderRadius: 14,
+    ...controls.panel,
     padding: 14,
     gap: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   pastTopic: { ...type.section, fontSize: 15 },
-  pastCode: { ...type.footnote, color: colors.muted, letterSpacing: 0.6 },
+  pastCode: { ...type.code, fontSize: 16 },
+  codeHint: {
+    fontFamily: 'Inter',
+    fontSize: 16,
+    letterSpacing: 0,
+    fontWeight: '400',
+    fontStyle: 'italic',
+    color: colors.ink,
+  },
 });

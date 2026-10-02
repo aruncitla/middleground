@@ -1,15 +1,15 @@
-import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
+import { CopyButton } from '@/components/CopyButton';
 import { CountdownPill } from '@/components/CountdownPill';
 import { ParticipantCluster } from '@/components/ParticipantCluster';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
+import { TopicCard } from '@/components/TopicCard';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
 import { thoughtShareUrl } from '@/lib/app';
@@ -37,7 +37,6 @@ export default function LobbyScreen() {
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [opening, setOpening] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [hint, setHint] = useState(shouldShowPlayHint);
   const closingRef = useRef(false);
@@ -92,12 +91,6 @@ export default function LobbyScreen() {
     }
   };
 
-  const onCopyLink = async () => {
-    await Clipboard.setStringAsync(thoughtShareUrl(code));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
-  };
-
   const onSubmit = async (seatId: string) => {
     if (!user) return;
     setSubmitting(true);
@@ -127,7 +120,6 @@ export default function LobbyScreen() {
           const canVote = unlocked && !timedOut;
           return (
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-        <BrandMark size="sm" />
         <RoomStageBar stage="thoughts" />
         {hint ? (
           <View style={styles.hint}>
@@ -165,15 +157,14 @@ export default function LobbyScreen() {
             <Text style={controls.ghostText}>Add a name to share a thought or vote</Text>
           </Pressable>
         )}
-        <Pressable onPress={() => void onCopyLink()} accessibilityRole="button">
-          <Text style={controls.ghostText}>
-            {copied ? 'Copied — paste it in your chat groups' : 'Copy the invite link and share in your chat groups'}
+        <CopyButton value={thoughtShareUrl(code)} />
+        <TopicCard>
+          <Text style={type.title}>{room?.topic}</Text>
+          <Text style={type.body}>
+            {memberCount} {memberCount === 1 ? 'person' : 'people'} in · {entries.length}{' '}
+            {entries.length === 1 ? 'thought' : 'thoughts'}
           </Text>
-        </Pressable>
-        <Text style={type.title}>{room?.topic}</Text>
-        <Text style={type.body}>
-          {memberCount} {memberCount === 1 ? 'person' : 'people'} in · {entries.length} {entries.length === 1 ? 'thought' : 'thoughts'}
-        </Text>
+        </TopicCard>
         <ParticipationStats participants={participants} seats={session.seats} entries={entries} />
         {room?.status === 'lobby' && room.closesAt ? (
           <>
@@ -224,9 +215,10 @@ export default function LobbyScreen() {
               onChangeText={setDraft}
               editable={remaining > 0 && room?.status === 'lobby'}
               placeholder="Say the thing out loud."
-              placeholderTextColor={colors.muted}
+              placeholderTextColor={colors.faint}
               style={[controls.input, styles.area]}
               multiline
+              {...({ dataSet: { mgInput: true } } as object)}
             />
             <Button
               disabled={submitting || remaining <= 0 || room?.status !== 'lobby' || !draft.trim()}
@@ -274,7 +266,7 @@ export default function LobbyScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 20, paddingBottom: 48, gap: 10 },
+  page: { paddingBottom: 48, gap: 10 },
   hint: { ...controls.panel, gap: 8 },
   wait: { ...type.section, color: colors.teal, marginTop: 24 },
   closed: { ...type.footnote, color: colors.teal },

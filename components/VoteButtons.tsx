@@ -1,5 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, type } from '@/lib/theme';
+import { Platform, View } from 'react-native';
+import { Button } from '@/components/Button';
 import { VOTE_LABELS, type VoteChoice } from '@/lib/voteChoice';
 
 type Props = {
@@ -7,72 +7,51 @@ type Props = {
   current?: VoteChoice;
 };
 
-function Hit({
-  choice,
-  selected,
-  onPress,
-}: {
-  choice: VoteChoice;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={VOTE_LABELS[choice]}
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.choice,
-        choice === 'agree' && styles.yes,
-        choice === 'disagree' && styles.no,
-        choice === 'maybe' && styles.mid,
-        selected && styles.choiceOn,
-        pressed && styles.pressed,
-      ]}
-    >
-      <Text
-        style={[
-          styles.label,
-          choice === 'agree' && styles.yesLabel,
-          choice === 'disagree' && styles.noLabel,
-          choice === 'maybe' && styles.midLabel,
-        ]}
-      >
-        {choice === 'disagree' ? '← No' : choice === 'maybe' ? '↓ Maybe' : 'Yes →'}
-      </Text>
-    </Pressable>
-  );
-}
-
 export function VoteButtons({ onChoice, current }: Props) {
   return (
-    <View style={styles.row}>
-      <Hit choice="disagree" selected={current === 'disagree'} onPress={() => onChoice('disagree')} />
-      <Hit choice="maybe" selected={current === 'maybe'} onPress={() => onChoice('maybe')} />
-      <Hit choice="agree" selected={current === 'agree'} onPress={() => onChoice('agree')} />
+    <View style={styles.row as object}>
+      <View style={styles.side}>
+        <Button
+          variant="coral"
+          label={VOTE_LABELS.disagree}
+          selected={current === 'disagree'}
+          onPress={() => onChoice('disagree')}
+        />
+      </View>
+      <View style={styles.mid}>
+        <Button
+          variant="maybe"
+          label={VOTE_LABELS.maybe}
+          selected={current === 'maybe'}
+          onPress={() => onChoice('maybe')}
+        />
+      </View>
+      <View style={styles.side}>
+        <Button
+          variant="primary"
+          label={VOTE_LABELS.agree}
+          selected={current === 'agree'}
+          onPress={() => onChoice('agree')}
+        />
+      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, zIndex: 20, elevation: 20 },
-  choice: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  yes: { backgroundColor: colors.teal },
-  no: { backgroundColor: '#3A1518' },
-  mid: { backgroundColor: '#2A2416' },
-  choiceOn: { opacity: 1, boxShadow: '0 0 0 2px rgba(255,255,255,0.25)' },
-  pressed: { opacity: 0.85 },
-  label: { ...type.button, fontSize: 13, letterSpacing: 0.1, textAlign: 'center' },
-  yesLabel: { color: colors.onTeal },
-  noLabel: { color: colors.coral },
-  midLabel: { color: colors.gold },
-});
+const styles = {
+  row:
+    Platform.OS === 'web'
+      ? {
+          display: 'grid' as const,
+          gridTemplateColumns: '1fr 104px 1fr',
+          gap: 10,
+          zIndex: 20,
+        }
+      : {
+          flexDirection: 'row' as const,
+          gap: 10,
+          zIndex: 20,
+        },
+  side: { flex: 1, minWidth: 0 },
+  mid: { width: 104, flexGrow: 0, flexShrink: 0 },
+};
