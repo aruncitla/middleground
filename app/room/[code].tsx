@@ -124,7 +124,7 @@ export default function RoomHomeScreen() {
     <Screen loading={loading || !ready} error={error || (!saved && ready ? 'Room not found' : null)}>
       <SeatGate containerCode={container} uid={user?.uid} required={false}>
         {(session) => {
-          const avatar = avatarById(session.seat.avatarId);
+          const avatar = session.seat ? avatarById(session.seat.avatarId) : null;
           return (
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
               <BrandMark />
@@ -139,7 +139,7 @@ export default function RoomHomeScreen() {
                     onChangeText={setNameDraft}
                     style={controls.input}
                     placeholder="Friday crew"
-                    placeholderTextColor={colors.faint}
+                    placeholderTextColor={colors.muted}
                     maxLength={80}
                   />
                   <Button label="Save name" onPress={() => void onRename()} />
@@ -165,9 +165,15 @@ export default function RoomHomeScreen() {
                 <Text style={styles.code}>{saved?.code}</Text>
               </Pressable>
               {saved?.created ? <Text style={type.footnote}>Created {formatDate(saved.created)}</Text> : null}
-              <Text style={type.footnote}>
-                {avatar.emoji} {session.seat.displayName}
-              </Text>
+              {session.seat ? (
+                <Text style={type.footnote}>
+                  {avatar?.emoji} {session.seat.displayName}
+                </Text>
+              ) : (
+                <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
+                  <Text style={controls.ghostText}>Add a name to join in</Text>
+                </Pressable>
+              )}
               <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
                 <Text style={controls.ghostText}>Switch seat</Text>
               </Pressable>

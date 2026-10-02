@@ -1,10 +1,12 @@
-import { forwardRef, useMemo } from 'react';
+import { forwardRef } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BrandMark } from '@/components/BrandMark';
-import { VennField } from '@/components/VennField';
+import { VoteScale } from '@/components/VoteScale';
 import { APP_HOST, APP_URL } from '@/lib/app';
-import { colors, fonts, type } from '@/lib/theme';
+import { colors, type } from '@/lib/theme';
+import { discussionScore } from '@/lib/voteChoice';
+import type { Card, Vote } from '@/types/room';
 
 export type GravityPhrase = {
   label: string;
@@ -15,11 +17,14 @@ export type GravityPhrase = {
 export type ConsensusSummaryCardProps = {
   topic: string;
   subtopic?: string;
-  phrases: GravityPhrase[];
-  agreedCount: number;
-  pointCount: number;
+  phrases?: GravityPhrase[];
+  cards?: Card[];
+  votes?: Vote[];
+  agreedCount?: number;
+  pointCount?: number;
   participantCount?: number;
   elapsedLabel?: string;
+  score?: number;
 };
 
 const MAX_WORDS = 7;
@@ -75,133 +80,39 @@ export function phraseFromCardText(text: string) {
   return clipPhrase(sentence);
 }
 
-function ratio(p: GravityPhrase) {
-  return p.total > 0 ? p.yes / p.total : 0;
-}
-
-function fontSizeFor(p: GravityPhrase, min: number, max: number) {
-  return Math.round(min + ratio(p) * (max - min));
-}
-
-function ofPoints(n: number, total: number) {
-  return `${Math.max(0, n)} of ${Math.max(0, total)}`;
-}
-
 export const ConsensusSummaryCard = forwardRef<View, ConsensusSummaryCardProps>(function ConsensusSummaryCard(
-  {
-    topic,
-    subtopic,
-    phrases,
-    agreedCount,
-    pointCount,
-    participantCount,
-    elapsedLabel,
-  },
+  { topic, cards = [], votes = [], participantCount, elapsedLabel, score },
   ref,
 ) {
-  const total = Math.max(0, pointCount);
-  const agreed = Math.min(Math.max(0, agreedCount), total);
-  const open = Math.max(0, total - agreed);
-  const rings = useMemo(() => {
-    const seen = new Set<string>();
-    const unique = phrases.filter((p) => {
-      const key = p.label.trim().toLowerCase();
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return p.total > 0;
-    });
-    unique.sort((a, b) => ratio(b) - ratio(a) || b.yes - a.yes);
-    const top = unique.slice(0, 12);
-    let core = top.filter((p) => ratio(p) >= 0.8).slice(0, 3);
-    if (core.length === 0) core = top.slice(0, Math.min(2, top.length));
-    const coreKeys = new Set(core.map((p) => p.label));
-    const rest = top.filter((p) => !coreKeys.has(p.label));
-    return {
-      core,
-      inner: rest.filter((p) => ratio(p) >= 0.5).slice(0, 5),
-      outer: rest.filter((p) => ratio(p) < 0.5).slice(0, 6),
-    };
-  }, [phrases]);
-
+  const discussion = score ?? discussionScore(cards);
   return (
     <View ref={ref} collapsable={false} style={styles.frame}>
       <LinearGradient
-        colors={['#09090b', '#111113', '#18181b', '#09090b']}
+        colors={['#09090B', '#111113', '#18181b', '#09090B']}
         locations={[0, 0.35, 0.72, 1]}
         start={{ x: 0.05, y: 0 }}
         end={{ x: 0.95, y: 1 }}
         style={styles.gradient}
       >
-        <VennField variant="card" />
-
-        <BrandMark size="sm" toHome={false} />
+        <BrandMark size="sm" toHome={false} fromMark />
         <Text style={styles.title} numberOfLines={3}>
           {topic}
         </Text>
-        {subtopic ? (
-          <Text style={styles.subtitle} numberOfLines={2}>
-            {subtopic}
-          </Text>
-        ) : null}
-
-        <View style={styles.well}>
-          <View style={styles.core}>
-            {rings.core.map((p) => (
-              <Text
-                key={p.label}
-                style={[styles.word, styles.wordCore, { fontSize: fontSizeFor(p, 16, 22) }]}
-                numberOfLines={2}
-              >
-                {p.label}
-              </Text>
-            ))}
-          </View>
-          <View style={styles.inner}>
-            {rings.inner.map((p) => (
-              <Text
-                key={p.label}
-                style={[styles.word, styles.wordInner, { fontSize: fontSizeFor(p, 12, 14) }]}
-                numberOfLines={2}
-              >
-                {p.label}
-              </Text>
-            ))}
-          </View>
-          <View style={styles.outer}>
-            {rings.outer.map((p) => (
-              <Text
-                key={p.label}
-                style={[styles.word, styles.wordOuter, { fontSize: fontSizeFor(p, 10, 12) }]}
-                numberOfLines={2}
-              >
-                {p.label}
-              </Text>
-            ))}
-          </View>
+        <View style={styles.scoreWrap}>
+          <Text style={styles.scoreKicker}>Discussion score</Text>
+          <Text style={styles.score}>{discussion}</Text>
         </View>
-
-        <View style={styles.statsRow}>
-          <View style={[styles.statCard, styles.statAgree]}>
-            <Text style={styles.statKicker}>Agreement</Text>
-            <Text style={styles.statValueAccent}>{ofPoints(agreed, total)}</Text>
-            <Text style={styles.statHint}>{total === 1 ? 'point agreed' : 'points agreed'}</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statKicker}>Open items</Text>
-            <Text style={styles.statValueMuted}>{ofPoints(open, total)}</Text>
-            <Text style={styles.statHint}>{total === 1 ? 'point still split' : 'points still split'}</Text>
-          </View>
+        <View style={styles.scales}>
+          {cards.slice(0, 6).map((card) => (
+            <VoteScale key={card.id} card={card} votes={votes} compact />
+          ))}
         </View>
-
         <View style={styles.footer}>
-          <View style={styles.footerBrand}>
-            <Text style={styles.watermark}>middleground</Text>
-            <Pressable onPress={() => void Linking.openURL(APP_URL)} accessibilityRole="link">
-              <Text style={styles.appLink}>{APP_HOST}</Text>
-            </Pressable>
-          </View>
+          <Pressable onPress={() => void Linking.openURL(APP_URL)} accessibilityRole="link">
+            <Text style={styles.appLink}>{APP_HOST}</Text>
+          </Pressable>
           <Text style={styles.meta}>
-            {[elapsedLabel, participantCount != null ? `${participantCount} participant${participantCount === 1 ? '' : 's'}` : null]
+            {[elapsedLabel, participantCount != null ? `${participantCount} people in` : null]
               .filter(Boolean)
               .join(' · ')}
           </Text>
@@ -216,136 +127,55 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     alignSelf: 'center',
-    aspectRatio: 3 / 4.15,
-    borderRadius: 22,
+    minHeight: 420,
+    borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
-    boxShadow: '0 0 40px rgba(99, 102, 241, 0.16)',
+    boxShadow: '0 0 40px rgba(245, 158, 11, 0.18)',
   },
   gradient: {
     flex: 1,
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 14,
+    gap: 10,
   },
   title: {
     ...type.title,
     fontSize: 22,
     lineHeight: 26,
-    marginTop: 12,
+    marginTop: 4,
   },
-  subtitle: {
-    ...type.body,
-    marginTop: 6,
-    fontSize: 13,
-  },
-  well: {
-    flex: 1,
-    marginTop: 10,
-    minHeight: 210,
+  scoreWrap: {
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  core: {
-    alignItems: 'center',
-    gap: 2,
-    zIndex: 2,
-    maxWidth: 220,
-  },
-  inner: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    zIndex: 2,
-    maxWidth: 300,
-  },
-  outer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
-    zIndex: 2,
-    maxWidth: 320,
-    opacity: 0.85,
-  },
-  word: {
-    fontFamily: fonts.medium,
-    textAlign: 'center',
-    paddingHorizontal: 5,
-  },
-  wordCore: {
-    color: colors.accentHover,
-    fontFamily: fonts.semibold,
-    fontWeight: '600',
-    letterSpacing: -0.6,
-  },
-  wordInner: {
-    color: colors.ink,
-    fontWeight: '500',
-  },
-  wordOuter: {
-    color: colors.faint,
-    fontWeight: '400',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
-  },
-  statCard: {
-    flex: 1,
-    borderRadius: 14,
-    padding: 12,
-    backgroundColor: 'rgba(24,24,27,0.72)',
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(245, 158, 11, 0.28)',
   },
-  statAgree: { borderColor: colors.accentSoft },
-  statKicker: {
-    ...type.kicker,
-    fontSize: 10,
-    textTransform: 'uppercase',
-  },
-  statValueAccent: {
-    color: colors.accentHover,
-    fontSize: 26,
-    fontFamily: fonts.semibold,
-    fontWeight: '600',
-    letterSpacing: -0.8,
-    marginTop: 2,
-  },
-  statValueMuted: {
+  scoreKicker: { ...type.kicker, color: colors.amber },
+  score: {
     color: colors.ink,
-    fontSize: 26,
-    fontFamily: fonts.semibold,
-    fontWeight: '600',
-    letterSpacing: -0.8,
-    marginTop: 2,
+    fontSize: 48,
+    fontFamily: 'Inter',
+    fontWeight: '700',
+    letterSpacing: -1.4,
+    textShadowColor: 'rgba(245, 158, 11, 0.55)',
+    textShadowRadius: 18,
   },
-  statHint: { ...type.footnote, color: colors.muted },
+  scales: { gap: 14, flex: 1 },
   footer: {
-    marginTop: 12,
+    marginTop: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
     gap: 8,
   },
-  footerBrand: { gap: 2, flexShrink: 1 },
-  watermark: {
-    color: colors.faint,
-    fontFamily: fonts.medium,
-    fontWeight: '500',
-    letterSpacing: -0.2,
-    fontSize: 11,
-  },
   appLink: {
-    color: colors.accentHover,
-    fontFamily: fonts.medium,
+    color: colors.teal,
+    fontFamily: 'Inter',
     fontWeight: '500',
     fontSize: 11,
   },

@@ -1,4 +1,4 @@
-type VoteCard = { text: string; agreeCount: number; disagreeCount: number };
+type VoteCard = { text: string; agreeCount: number; disagreeCount: number; maybeCount?: number };
 type RoomStatus = 'lobby' | 'synthesizing' | 'swiping' | 'summary' | string;
 
 function clip(text: string) {
@@ -22,7 +22,7 @@ export function topicIsArchived(status: RoomStatus | string | undefined) {
 }
 
 export function verdictLine(cards: VoteCard[]): string {
-  const voted = cards.filter((c) => c.agreeCount + c.disagreeCount > 0);
+  const voted = cards.filter((c) => c.agreeCount + c.disagreeCount + (c.maybeCount ?? 0) > 0);
   if (!voted.length) return 'No votes yet';
 
   const locked = voted

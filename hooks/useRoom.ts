@@ -12,6 +12,7 @@ import {
   containerCodeOf,
 } from '@/lib/roomService';
 import { mergeLiveEntries } from '@/lib/entries';
+import type { Agreement, Card, Entry, Participant, Room, Seat, Vote } from '@/types/room';
 
 export function useRoom(code: string | undefined) {
   const [room, setRoom] = useState<Room | null>(null);
@@ -22,23 +23,45 @@ export function useRoom(code: string | undefined) {
   const [agreements, setAgreements] = useState<Agreement[]>([]);
   const [seats, setSeats] = useState<Seat[]>([]);
   const [ready, setReady] = useState(false);
+  const [uid, setUid] = useState<string | undefined>();
 
   useEffect(() => {
-    if (!code) return;
+    try {
+      return getFirebaseAuth().onAuthStateChanged((user) => setUid(user?.uid));
+    } catch {
+      return undefined;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!code || !uid) return;
     setReady(false);
+    setEntries([]);
+    setCards([]);
+    setVotes([]);
+    setAgreements([]);
     const unsubs = [
       subscribeRoom(code, (next) => {
         setRoom(next);
         setReady(true);
       }),
       subscribeParticipants(code, setParticipants),
-      subscribeEntries(code, (rows) => {
-        setEntries((prev) => mergeLiveEntries(prev, rows));
-      }),
       subscribeAgreements(code, setAgreements),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [code]);
+  }, [code, uid]);
+
+  useEffect(() => {
+    if (!code || !uid) return;
+    const unsubs = [
+      subscribeEntries(code, (rows) => {
+        setEntries((prev) => mergeLiveEntries(prev, rows));
+      }),
+      subscribeCards(code, setCards),
+      subscribeVotes(code, setVotes),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, [code, uid]);
 
   const container = room ? containerCodeOf(room) : undefined;
 
@@ -50,32 +73,16 @@ export function useRoom(code: string | undefined) {
     return subscribeSeats(container, setSeats);
   }, [container]);
 
-  useEffect(() => {
-    if (!code) {
-      setCards([]);
-      setVotes([]);
-      return;
-    }
-    const unsubs = [subscribeCards(code, setCards), subscribeVotes(code, setVotes)];
-    return () => unsubs.forEach((u) => u());
-  }, [code]);
-
   const me = useMemo(
-    () => (uid: string | undefined) => participants.find((p) => p.id === uid) ?? null,
+    () => (memberId: string | undefined) => participants.find((p) => p.id === memberId) ?? null,
     [participants],
   );
 
   useEffect(() => {
-    let uid: string | undefined;
-    try {
-      uid = getFirebaseAuth().currentUser?.uid;
-    } catch {
-      return;
-    }
     if (!uid || !code || !room) return;
     if (!participants.some((p) => p.id === uid)) return;
     void rememberJoinedRoom(uid, code, room).catch(() => {});
-  }, [code, room, participants]);
+  }, [code, room, participants, uid]);
 
   const rememberEntry = (entry: Entry) => {
     setEntries((prev) => (prev.some((row) => row.id === entry.id) ? prev : [...prev, entry]));

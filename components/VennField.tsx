@@ -11,26 +11,26 @@ const AMBIENT: CircleSpec[] = [
   {
     size: 400,
     style: { top: -96, right: -72 },
-    fill: 'rgba(79, 70, 229, 0.16)',
-    stroke: 'rgba(99, 102, 241, 0.34)',
+    fill: 'rgba(255, 107, 107, 0.14)',
+    stroke: 'rgba(255, 107, 107, 0.32)',
   },
   {
     size: 340,
     style: { top: 28, right: 86 },
-    fill: 'rgba(99, 102, 241, 0.12)',
-    stroke: 'rgba(165, 180, 252, 0.28)',
+    fill: 'rgba(45, 212, 191, 0.12)',
+    stroke: 'rgba(45, 212, 191, 0.28)',
   },
   {
     size: 210,
     style: { top: 210, left: 18 },
     fill: 'rgba(255, 255, 255, 0.03)',
-    stroke: 'rgba(161, 161, 170, 0.22)',
+    stroke: 'rgba(212, 212, 216, 0.22)',
   },
   {
     size: 300,
     style: { bottom: -110, left: -90 },
-    fill: 'rgba(251, 191, 36, 0.06)',
-    stroke: 'rgba(251, 191, 36, 0.18)',
+    fill: 'rgba(245, 158, 11, 0.1)',
+    stroke: 'rgba(245, 158, 11, 0.22)',
   },
 ];
 
@@ -38,14 +38,14 @@ const CARD: CircleSpec[] = [
   {
     size: 220,
     style: { top: 88, left: -36 },
-    fill: 'rgba(79, 70, 229, 0.12)',
-    stroke: 'rgba(99, 102, 241, 0.28)',
+    fill: 'rgba(255, 107, 107, 0.12)',
+    stroke: 'rgba(255, 107, 107, 0.28)',
   },
   {
     size: 220,
     style: { top: 88, right: -36 },
-    fill: 'rgba(99, 102, 241, 0.1)',
-    stroke: 'rgba(165, 180, 252, 0.24)',
+    fill: 'rgba(45, 212, 191, 0.12)',
+    stroke: 'rgba(45, 212, 191, 0.24)',
   },
 ];
 
@@ -79,13 +79,6 @@ export function VennField({ variant = 'ambient' }: Props) {
 }
 
 const styles = StyleSheet.create({
-  layer: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  circle: {
-    position: 'absolute',
-    borderWidth: 1,
-    mixBlendMode: 'screen',
-  },
+  layer: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
+  circle: { position: 'absolute', borderWidth: 1 },
 });

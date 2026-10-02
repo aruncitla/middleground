@@ -1,9 +1,12 @@
+import type { VoteChoice } from '@/lib/voteChoice';
+
 /** Fallback when the card has not been measured yet. */
 export const SWIPE_THRESHOLD = 120;
+export const MAYBE_THRESHOLD = 90;
 
 /**
  * Finger/card travel on the screen X axis.
- * Positive = moved right = Yes. Negative = moved left = No.
+ * Positive = moved right = Works for me. Negative = moved left = Not for me.
  */
 export function choiceFromSwipeDx(
   dx: number,
@@ -21,16 +24,38 @@ export function swipeThresholdForWidth(width: number) {
   return width / 3;
 }
 
-export function stampOpacity(dx: number, threshold: number) {
+export function maybeThresholdForHeight(height: number) {
   'worklet';
-  const t = threshold > 0 ? Math.abs(dx) / threshold : 0;
+  if (!(height > 0)) return MAYBE_THRESHOLD;
+  return Math.max(72, height / 4);
+}
+
+export function choiceFromSwipe(
+  dx: number,
+  dy: number,
+  xThreshold: number = SWIPE_THRESHOLD,
+  yThreshold: number = MAYBE_THRESHOLD,
+): VoteChoice | null {
+  'worklet';
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ay > ax && dy > yThreshold) return 'maybe';
+  if (ax >= ay) return choiceFromSwipeDx(dx, xThreshold);
+  return null;
+}
+
+export function stampOpacity(travel: number, threshold: number) {
+  'worklet';
+  const t = threshold > 0 ? Math.abs(travel) / threshold : 0;
   return Math.max(0, Math.min(1, t));
 }
 
-/** 1 = past YES threshold, -1 = past NO threshold, 0 = still in the dead zone. */
-export function armedSide(dx: number, threshold: number) {
+/** 1 = works-for-me, -1 = not-for-me, 2 = maybe, 0 = dead zone. */
+export function armedSide(dx: number, dy: number, xThreshold: number, yThreshold: number) {
   'worklet';
-  if (dx > threshold) return 1;
-  if (dx < -threshold) return -1;
+  const choice = choiceFromSwipe(dx, dy, xThreshold, yThreshold);
+  if (choice === 'agree') return 1;
+  if (choice === 'disagree') return -1;
+  if (choice === 'maybe') return 2;
   return 0;
 }

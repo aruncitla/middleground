@@ -1,5 +1,6 @@
 import { voterId } from '@/lib/seatsLocal';
-import type { Card, Vote } from '@/types/room';
+import { isVoteChoice } from '@/lib/voteChoice';
+import type { Card, Vote, VoteChoice } from '@/types/room';
 
 export function voteKey(vote: Pick<Vote, 'uid' | 'seatId' | 'cardId'>) {
   return `${voterId(vote)}_${vote.cardId}`;
@@ -17,16 +18,17 @@ export function mergeVotes(server: Vote[], local: Vote[]): Vote[] {
 }
 
 export function withVoteTallies(cards: Card[], votes: Vote[]): Card[] {
-  const byCard = new Map<string, { agree: number; disagree: number }>();
+  const byCard = new Map<string, { agree: number; disagree: number; maybe: number }>();
   for (const vote of votes) {
-    const row = byCard.get(vote.cardId) ?? { agree: 0, disagree: 0 };
+    const row = byCard.get(vote.cardId) ?? { agree: 0, disagree: 0, maybe: 0 };
     if (vote.choice === 'agree') row.agree += 1;
+    else if (vote.choice === 'maybe') row.maybe += 1;
     else row.disagree += 1;
     byCard.set(vote.cardId, row);
   }
   return cards.map((card) => {
-    const row = byCard.get(card.id) ?? { agree: 0, disagree: 0 };
-    return { ...card, agreeCount: row.agree, disagreeCount: row.disagree };
+    const row = byCard.get(card.id) ?? { agree: 0, disagree: 0, maybe: 0 };
+    return { ...card, agreeCount: row.agree, disagreeCount: row.disagree, maybeCount: row.maybe };
   });
 }
 
@@ -34,7 +36,7 @@ export function optimisticVote(opts: {
   uid: string;
   seatId: string;
   cardId: string;
-  choice: 'agree' | 'disagree';
+  choice: VoteChoice;
 }): Vote {
   return {
     id: `${opts.seatId}_${opts.cardId}`,
@@ -64,9 +66,10 @@ export function seatVotedOnCard(votes: Vote[], seatId: string, cardId: string) {
   return votes.some((vote) => vote.cardId === cardId && voterId(vote) === seatId);
 }
 
-export function choiceForSeat(votes: Vote[], seatId: string | undefined, cardId: string) {
+export function choiceForSeat(votes: Vote[], seatId: string | undefined, cardId: string): VoteChoice | undefined {
   if (!seatId) return undefined;
-  return votes.find((vote) => vote.cardId === cardId && voterId(vote) === seatId)?.choice;
+  const choice = votes.find((vote) => vote.cardId === cardId && voterId(vote) === seatId)?.choice;
+  return isVoteChoice(choice) ? choice : undefined;
 }
 
 export function seatCompletedDeck(votes: Vote[], seatId: string, cardIds: string[]) {

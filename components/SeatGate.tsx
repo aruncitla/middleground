@@ -21,7 +21,7 @@ import {
 import type { Participant, Seat } from '@/types/room';
 
 export type SeatSession = {
-  seat: Seat;
+  seat: Seat | null;
   seats: Seat[];
   mySeats: Seat[];
   switching: boolean;
@@ -170,14 +170,14 @@ export function SeatPicker({
   return (
     <View style={styles.panel}>
       <Text style={type.section}>{title}</Text>
-      <Text style={type.footnote}>A seat is a name and emoji in this room. No account.</Text>
+      <Text style={type.footnote}>A name and emoji so the room knows which thoughts are yours. No account.</Text>
       <Text style={[type.label, styles.label]}>Your name</Text>
       <TextInput
         value={name}
         onChangeText={setName}
         placeholder="Your name"
         autoComplete="name"
-        placeholderTextColor={colors.faint}
+        placeholderTextColor={colors.muted}
         style={controls.input}
       />
       <Text style={[type.label, styles.label]}>Emoji</Text>
@@ -267,7 +267,7 @@ export function SwitchSeatPanel({
           </Pressable>
         );
       })}
-      <SeatPicker title="Claim another seat" confirmLabel="Create seat" busy={busy} onSubmit={onCreate} />
+      <SeatPicker title="Add another name" confirmLabel="That's me" busy={busy} onSubmit={onCreate} />
       <Pressable onPress={onClose} accessibilityRole="button">
         <Text style={controls.ghostText}>Close</Text>
       </Pressable>
@@ -376,8 +376,8 @@ export function SeatGate({
         />
       ) : !session.active && required ? (
         <SeatPicker
-          title="Claim a seat"
-          confirmLabel="Join with this seat"
+          title="Pick a name"
+          confirmLabel="That's me"
           busy={busy}
           onSubmit={(draft) => void submitClaim(draft, false)}
         />
@@ -391,7 +391,7 @@ export function SeatGate({
         })
       ) : (
         children({
-          seat: { id: uid, displayName: 'Guest', avatarId: 'fox', claimerUids: [uid] },
+          seat: null,
           seats: session.seats,
           mySeats: session.mySeats,
           switching: session.switching,
@@ -420,8 +420,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   avatarOn: {
-    borderColor: colors.accentHover,
-    boxShadow: '0 0 0 3px rgba(99, 102, 241, 0.35)',
+    borderColor: colors.teal,
+    boxShadow: '0 0 0 3px rgba(45, 212, 191, 0.35)',
   },
   emoji: { fontSize: 22 },
   seatRow: {

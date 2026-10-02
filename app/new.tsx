@@ -116,7 +116,7 @@ export default function NewTopicScreen() {
           }}
           placeholder="Your name"
           autoComplete="name"
-          placeholderTextColor={colors.faint}
+          placeholderTextColor={colors.muted}
           style={controls.input}
         />
 
@@ -130,7 +130,7 @@ export default function NewTopicScreen() {
                 if (formError) setFormError(null);
               }}
               placeholder="Friday crew"
-              placeholderTextColor={colors.faint}
+              placeholderTextColor={colors.muted}
               style={controls.input}
               maxLength={80}
             />
@@ -148,7 +148,7 @@ export default function NewTopicScreen() {
             value={topic}
             onChangeText={setTopic}
             placeholder="Where should we go on vacation?"
-            placeholderTextColor={colors.faint}
+            placeholderTextColor={colors.muted}
             style={controls.input}
           />
           <Text style={[type.label, styles.label]}>Mode</Text>
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   },
   chipOn: {
     borderColor: colors.accentHover,
-    boxShadow: '0 0 0 3px rgba(99, 102, 241, 0.35)',
+    boxShadow: '0 0 0 3px rgba(45, 212, 191, 0.35)',
   },
   chipLabel: { ...type.body, color: colors.muted, fontSize: 13 },
   chipLabelOn: { ...type.body, color: colors.ink, fontSize: 13 },

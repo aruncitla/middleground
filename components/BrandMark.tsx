@@ -1,20 +1,22 @@
 import { Link } from 'expo-router';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { LoopMark } from '@/components/LoopMark';
 import { type } from '@/lib/theme';
-
-const mark = require('../assets/brand/bridge-m.png');
 
 type BrandProps = {
   size?: 'sm' | 'md';
   toHome?: boolean;
+  fromMark?: boolean;
 };
 
-export function BrandMark({ size = 'md', toHome = true }: BrandProps) {
-  const dim = size === 'sm' ? 28 : 36;
+export function BrandMark({ size = 'md', toHome = true, fromMark = false }: BrandProps) {
+  const dim = size === 'sm' ? 44 : 56;
   const row = (
     <View style={styles.row}>
-      <Image source={mark} style={[styles.mark, { width: dim, height: dim * 0.62 }]} resizeMode="contain" />
-      <Text style={[type.brand, size === 'sm' && styles.smWord]}>Middleground</Text>
+      <LoopMark size={dim} />
+      <Text style={[type.brand, size === 'sm' && styles.smWord]}>
+        {fromMark ? 'from Middleground' : 'Middleground'}
+      </Text>
     </View>
   );
   if (!toHome) return row;
@@ -29,6 +31,5 @@ export function BrandMark({ size = 'md', toHome = true }: BrandProps) {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  mark: { mixBlendMode: 'screen' },
   smWord: { fontSize: 14, letterSpacing: -0.3 },
 });

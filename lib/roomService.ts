@@ -22,6 +22,7 @@ import { getDb } from '@/lib/firebase';
 import { rememberLocalRoom } from '@/lib/historyLocal';
 import { matchSeat, rememberSeat } from '@/lib/seatsLocal';
 import { topicIsArchived, topicIsLive, verdictLine, weekStreak } from '@/lib/verdict';
+import { countField, isVoteChoice } from '@/lib/voteChoice';
 import type {
   Agreement,
   Card,
@@ -39,6 +40,7 @@ import type {
   TopicMode,
   TopicPreview,
   Vote,
+  VoteChoice,
 } from '@/types/room';
 
 export const DEFAULT_CLOSE_WINDOW: CloseWindowId = '3d';
@@ -518,10 +520,10 @@ export async function castVote(
   code: string,
   uid: string,
   cardId: string,
-  choice: 'agree' | 'disagree',
+  choice: VoteChoice,
   seatId: string,
 ) {
-  if (!seatId) throw new Error('Claim a seat first');
+  if (!seatId) throw new Error('Pick a name first');
   const db = getDb();
   const voteRef = doc(db, 'rooms', code, 'votes', `${seatId}_${cardId}`);
   const cardRef = doc(db, 'rooms', code, 'cards', cardId);
@@ -535,18 +537,19 @@ export async function castVote(
     const cardSnap = await tx.get(cardRef);
     if (!cardSnap.exists()) throw new Error('Card not found');
     if (existing.exists()) {
-      const prev = existing.data()?.choice as 'agree' | 'disagree';
+      const prevRaw = existing.data()?.choice;
+      const prev: VoteChoice = isVoteChoice(prevRaw) ? prevRaw : 'agree';
       if (prev === choice) return;
       tx.update(voteRef, { choice });
       tx.update(cardRef, {
-        [prev === 'agree' ? 'agreeCount' : 'disagreeCount']: increment(-1),
-        [choice === 'agree' ? 'agreeCount' : 'disagreeCount']: increment(1),
+        [countField(prev)]: increment(-1),
+        [countField(choice)]: increment(1),
       });
       return;
     }
     tx.set(voteRef, { uid, seatId, cardId, choice });
     tx.update(cardRef, {
-      [choice === 'agree' ? 'agreeCount' : 'disagreeCount']: increment(1),
+      [countField(choice)]: increment(1),
     });
   });
 }
@@ -688,6 +691,7 @@ function mapCard(id: string, data: Record<string, unknown>): Card {
     order: typeof data.order === 'number' ? data.order : 0,
     agreeCount: typeof data.agreeCount === 'number' ? data.agreeCount : 0,
     disagreeCount: typeof data.disagreeCount === 'number' ? data.disagreeCount : 0,
+    maybeCount: typeof data.maybeCount === 'number' ? data.maybeCount : 0,
     createdAt: toDate(data.createdAt),
     sourceEntryIds,
     sourceCount: typeof data.sourceCount === 'number' ? data.sourceCount : sourceEntryIds?.length,
@@ -700,7 +704,7 @@ function mapVote(id: string, data: Record<string, unknown>): Vote {
     id,
     uid: String(data.uid ?? ''),
     cardId: String(data.cardId ?? ''),
-    choice: data.choice === 'disagree' ? 'disagree' : 'agree',
+    choice: isVoteChoice(data.choice) ? data.choice : 'agree',
     seatId,
   };
 }

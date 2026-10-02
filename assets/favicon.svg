@@ -1,0 +1,18 @@
+<svg viewBox="0 0 76 76" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="76" height="76" fill="#09090B"/>
+  <g transform="translate(0 22)">
+    <defs>
+      <clipPath id="mg-l"><path d="M15 3 L33 3 A13 13 0 0 1 33 29 L15 29 A13 13 0 0 1 15 3 Z"/></clipPath>
+      <clipPath id="mg-r"><path d="M43 3 L61 3 A13 13 0 0 1 61 29 L43 29 A13 13 0 0 1 43 3 Z"/></clipPath>
+      <radialGradient id="mg-glow">
+        <stop offset="0%" stop-color="#FCD34D"/>
+        <stop offset="100%" stop-color="#F59E0B" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <g clip-path="url(#mg-l)"><g clip-path="url(#mg-r)">
+      <rect width="76" height="32" fill="url(#mg-glow)"/>
+    </g></g>
+    <path d="M15 3 L33 3 A13 13 0 0 1 33 29 L15 29 A13 13 0 0 1 15 3 Z" stroke="#FF6B6B" stroke-width="4"/>
+    <path d="M43 3 L61 3 A13 13 0 0 1 61 29 L43 29 A13 13 0 0 1 43 3 Z" stroke="#2DD4BF" stroke-width="4"/>
+  </g>
+</svg>

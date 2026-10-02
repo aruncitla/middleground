@@ -1,23 +1,36 @@
 import { Platform, type TextStyle } from 'react-native';
 
 export const colors = {
-  bg: '#09090b',
+  bg: '#09090B',
   surface: 'rgba(24, 24, 27, 0.62)',
-  card: '#18181b',
+  card: 'rgba(24, 24, 27, 0.62)',
+  cardSolid: '#18181B',
   cardAlt: '#1c1c20',
   border: 'rgba(39, 39, 42, 0.85)',
   input: 'rgba(39, 39, 42, 0.5)',
   inputBorder: 'rgba(63, 63, 70, 0.6)',
   ink: '#ffffff',
-  muted: '#a1a1aa',
-  faint: '#52525b',
-  accent: '#4f46e5',
-  accentHover: '#6366f1',
-  accentSoft: 'rgba(99, 102, 241, 0.45)',
-  accentGlow: 'rgba(99, 102, 241, 0.12)',
-  warmGlow: 'rgba(251, 191, 36, 0.06)',
-  danger: '#ef4444',
+  muted: '#D4D4D8',
+  faint: '#A1A1AA',
+  coral: '#FF6B6B',
+  teal: '#2DD4BF',
+  gold: '#E8B84A',
+  amber: '#E8B84A',
+  accent: '#2DD4BF',
+  accentHover: '#5EEAD4',
+  accentSoft: 'rgba(45, 212, 191, 0.35)',
+  accentGlow: 'rgba(45, 212, 191, 0.16)',
+  warmGlow: 'rgba(232, 184, 74, 0.2)',
+  coralGlow: 'rgba(255, 107, 107, 0.22)',
+  tealGlow: 'rgba(45, 212, 191, 0.22)',
+  danger: '#FF6B6B',
+  onTeal: '#042F2E',
 };
+
+/** Coral and teal with a dark middle — never orange mixed into teal. */
+export const spectrum = ['#FF6B6B', '#27272A', '#2DD4BF'] as const;
+
+export const candy = ['#5EEAD4', '#F9A8D4', '#C4B5FD', '#FDE68A'] as const;
 
 export const fonts = {
   light: 'Inter',
@@ -86,7 +99,7 @@ export const type = {
     fontSize: 12,
     lineHeight: 18,
     letterSpacing: 0,
-    color: colors.faint,
+    color: colors.muted,
   },
   button: {
     fontFamily: fonts.semibold,
@@ -115,14 +128,15 @@ export const controls = {
     ...webFocus,
   },
   primary: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.teal,
     borderRadius: 12,
     paddingVertical: 13,
     alignItems: 'center' as const,
-    boxShadow: '0 10px 28px rgba(99, 102, 241, 0.18)',
+    boxShadow: '0 10px 28px rgba(45, 212, 191, 0.28)',
   },
   primaryText: {
     ...type.button,
+    color: colors.onTeal,
   },
   secondary: {
     backgroundColor: 'transparent',
@@ -154,17 +168,21 @@ export const controls = {
 };
 
 export const avatars = [
-  { id: 'fox', emoji: '🦊', color: '#3f3f46' },
-  { id: 'alien', emoji: '👽', color: '#27272a' },
-  { id: 'frog', emoji: '🐸', color: '#365314' },
-  { id: 'fire', emoji: '🔥', color: '#431407' },
-  { id: 'rainbow', emoji: '🌈', color: '#312e81' },
-  { id: 'robot', emoji: '👾', color: '#1e293b' },
-  { id: 'hat', emoji: '🎩', color: '#1c1917' },
+  { id: 'fox', emoji: '🦊', color: 'rgba(94, 234, 212, 0.28)' },
+  { id: 'alien', emoji: '👽', color: 'rgba(196, 181, 253, 0.28)' },
+  { id: 'frog', emoji: '🐸', color: 'rgba(249, 168, 212, 0.28)' },
+  { id: 'fire', emoji: '🔥', color: 'rgba(253, 230, 138, 0.28)' },
+  { id: 'rainbow', emoji: '🌈', color: 'rgba(94, 234, 212, 0.28)' },
+  { id: 'robot', emoji: '👾', color: 'rgba(196, 181, 253, 0.28)' },
+  { id: 'hat', emoji: '🎩', color: 'rgba(249, 168, 212, 0.28)' },
 ] as const;
 
 export type AvatarId = (typeof avatars)[number]['id'];
 
 export function avatarById(id: string) {
   return avatars.find((a) => a.id === id) ?? avatars[0];
+}
+
+export function candyForIndex(index: number) {
+  return candy[Math.abs(index) % candy.length] ?? candy[0];
 }

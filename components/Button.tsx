@@ -12,7 +12,12 @@ export function Button({ label, variant = 'primary', disabled, style, ...rest }:
     <Pressable
       accessibilityRole="button"
       disabled={disabled}
-      style={[isPrimary ? controls.primary : controls.secondary, disabled && { opacity: 0.45 }, style]}
+      style={[
+        { width: '100%' },
+        isPrimary ? controls.primary : controls.secondary,
+        disabled && { opacity: 0.45 },
+        style,
+      ]}
       {...rest}
     >
       <Text style={isPrimary ? controls.primaryText : controls.secondaryText}>{label}</Text>

@@ -14,6 +14,7 @@ import { Button } from '@/components/Button';
 import { Screen } from '@/components/Screen';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useSavedRooms } from '@/hooks/usePastRooms';
+import { DEMO_ROOM_CODE } from '@/lib/app';
 import { notify } from '@/lib/notify';
 import { peekRoom } from '@/lib/roomService';
 import { pathForRoom } from '@/lib/roomPath';
@@ -77,6 +78,9 @@ export default function HomeScreen() {
             onPress={() => router.push('/new')}
             label="Start a topic"
           />
+          <Pressable onPress={() => router.push(`/summary/${DEMO_ROOM_CODE}`)} accessibilityRole="button">
+            <Text style={controls.ghostText}>See a live debate</Text>
+          </Pressable>
         </View>
 
         <View style={controls.panel}>
@@ -87,7 +91,7 @@ export default function HomeScreen() {
             placeholder="K7M2QX"
             autoCapitalize="characters"
             maxLength={6}
-            placeholderTextColor={colors.faint}
+            placeholderTextColor={colors.muted}
             style={controls.input}
           />
           <Button disabled={busy} onPress={() => void onJoin()} variant="secondary" label="Join room" />

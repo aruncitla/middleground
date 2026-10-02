@@ -41,6 +41,7 @@ export type Entry = {
 };
 
 export type CardKind = 'synthesized' | 'blindspot';
+export type VoteChoice = 'agree' | 'disagree' | 'maybe';
 
 export type Card = {
   id: string;
@@ -49,16 +50,18 @@ export type Card = {
   order: number;
   agreeCount: number;
   disagreeCount: number;
+  maybeCount: number;
   createdAt?: Date | null;
   sourceEntryIds?: string[];
   sourceCount?: number;
+  example?: boolean;
 };
 
 export type Vote = {
   id: string;
   uid: string;
   cardId: string;
-  choice: 'agree' | 'disagree';
+  choice: VoteChoice;
   seatId?: string;
 };
 

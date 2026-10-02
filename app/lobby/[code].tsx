@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/Button';
 import { CountdownPill } from '@/components/CountdownPill';
@@ -14,6 +14,7 @@ import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
 import { thoughtShareUrl } from '@/lib/app';
 import { seatEntryCount, sharingSeatCount, votingUnlocked } from '@/lib/entries';
+import { markPlayHintSeen, shouldShowPlayHint } from '@/lib/firstRun';
 import { notify } from '@/lib/notify';
 import { avatarById, colors, controls, type } from '@/lib/theme';
 import { closeVotingIfOpen, containerCodeOf, ensureCardsFromEntries, reopenThoughts, submitEntry } from '@/lib/roomService';
@@ -38,6 +39,7 @@ export default function LobbyScreen() {
   const [opening, setOpening] = useState(false);
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [hint, setHint] = useState(shouldShowPlayHint);
   const closingRef = useRef(false);
 
   const msLeft = room?.closesAt ? room.closesAt.getTime() - now : null;
@@ -96,10 +98,6 @@ export default function LobbyScreen() {
     setTimeout(() => setCopied(false), 1600);
   };
 
-  const onLeave = () => {
-    router.replace('/');
-  };
-
   const onSubmit = async (seatId: string) => {
     if (!user) return;
     setSubmitting(true);
@@ -107,6 +105,10 @@ export default function LobbyScreen() {
       const created = await submitEntry(code, user.uid, draft, seatId);
       rememberEntry(created);
       setDraft('');
+      if (hint) {
+        markPlayHintSeen();
+        setHint(false);
+      }
     } catch (e) {
       notify('Could not submit', e instanceof Error ? e.message : String(e));
     } finally {
@@ -116,18 +118,31 @@ export default function LobbyScreen() {
 
   return (
     <Screen loading={authLoading || !ready} error={authError || (!room && ready ? 'Room not found' : null)}>
-      <SeatGate containerCode={container} topicCode={code} uid={user?.uid}>
+      <SeatGate containerCode={container} topicCode={code} uid={user?.uid} required={false}>
         {(session) => {
           const memberCount = session.seats.length || participants.length || seats.length;
-          const avatar = avatarById(session.seat.avatarId);
+          const avatar = session.seat ? avatarById(session.seat.avatarId) : null;
           const remaining = Math.max(0, (room?.entryLimit ?? 10) - seatEntryCount(entries, session.seat));
           const myThoughts = seatEntryCount(entries, session.seat);
-          const canVote = unlocked && myThoughts > 0 && !timedOut;
+          const canVote = unlocked && !timedOut;
           return (
-      <View style={styles.page}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
         <BrandMark size="sm" />
         <RoomStageBar stage="thoughts" />
-        <Text style={type.kicker}>Lobby</Text>
+        {hint ? (
+          <View style={styles.hint}>
+            <Text style={type.section}>Add your thought. Swipe through the group’s. Find the overlap.</Text>
+            <Pressable
+              onPress={() => {
+                markPlayHintSeen();
+                setHint(false);
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={controls.ghostText}>Got it</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {room?.parentRoomId ? (
           <Pressable onPress={() => router.replace(`/summary/${room.parentRoomId}`)} accessibilityRole="button">
             <Text style={controls.ghostText}>Sub-topic of {room.parentRoomId} · back to original</Text>
@@ -139,11 +154,17 @@ export default function LobbyScreen() {
         >
           <Text style={controls.ghostText}>Room home</Text>
         </Pressable>
-        <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
-          <Text style={controls.ghostText}>
-            {avatar.emoji} {session.seat.displayName} · Switch seat
-          </Text>
-        </Pressable>
+        {session.seat ? (
+          <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
+            <Text style={controls.ghostText}>
+              {avatar?.emoji} {session.seat.displayName} · Switch
+            </Text>
+          </Pressable>
+        ) : (
+          <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
+            <Text style={controls.ghostText}>Add a name to share a thought or vote</Text>
+          </Pressable>
+        )}
         <Pressable onPress={() => void onCopyLink()} accessibilityRole="button">
           <Text style={controls.ghostText}>
             {copied ? 'Copied — paste it in your chat groups' : 'Copy the invite link and share in your chat groups'}
@@ -151,7 +172,7 @@ export default function LobbyScreen() {
         </Pressable>
         <Text style={type.title}>{room?.topic}</Text>
         <Text style={type.body}>
-          {memberCount} in the room · {entries.length} thoughts · 10 each
+          {memberCount} {memberCount === 1 ? 'person' : 'people'} in · {entries.length} {entries.length === 1 ? 'thought' : 'thoughts'}
         </Text>
         <ParticipationStats participants={participants} seats={session.seats} entries={entries} />
         {room?.status === 'lobby' && room.closesAt ? (
@@ -170,6 +191,19 @@ export default function LobbyScreen() {
         ) : null}
         <ParticipantCluster participants={participants} seats={session.seats} entries={entries} />
 
+        {entries.length ? (
+          <View style={styles.board}>
+            <Text style={type.label}>Thoughts in this room</Text>
+            {entries.map((entry) => (
+              <View key={entry.id} style={styles.thought}>
+                <Text style={styles.thoughtText}>{entry.text}</Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={type.body}>No thoughts yet. Add yours — or just read along.</Text>
+        )}
+
         {room?.status === 'synthesizing' ? (
           <>
             <Text style={styles.wait}>
@@ -181,21 +215,30 @@ export default function LobbyScreen() {
               label={opening ? 'Working…' : 'Back to sharing thoughts'}
               onPress={() => void onReopen()}
             />
-            <Text style={type.footnote}>No one has voted yet. You can reopen thoughts for everyone.</Text>
           </>
         ) : (
           <>
-            <Text style={[type.label, styles.label]}>Your thought ({remaining} left)</Text>
+            <Text style={[type.label, styles.label]}>Add your thought ({remaining} left)</Text>
             <TextInput
               value={draft}
               onChangeText={setDraft}
               editable={remaining > 0 && room?.status === 'lobby'}
               placeholder="Say the thing out loud."
-              placeholderTextColor={colors.faint}
+              placeholderTextColor={colors.muted}
               style={[controls.input, styles.area]}
               multiline
             />
-            <Button disabled={submitting || remaining <= 0 || room?.status !== 'lobby'} onPress={() => void onSubmit(session.seat.id)} label={submitting ? 'Submitting…' : 'Submit'} />
+            <Button
+              disabled={submitting || remaining <= 0 || room?.status !== 'lobby' || !draft.trim()}
+              onPress={() => {
+                if (!session.seat) {
+                  session.setSwitching(true);
+                  return;
+                }
+                void onSubmit(session.seat.id);
+              }}
+              label={submitting ? 'Submitting…' : 'Add thought'}
+            />
           </>
         )}
 
@@ -204,19 +247,25 @@ export default function LobbyScreen() {
             <Button
               disabled={opening || !canVote}
               label={opening ? 'Opening…' : 'Done sharing — vote'}
-              onPress={() => void onGoVote()}
+              onPress={() => {
+                if (!session.seat) {
+                  session.setSwitching(true);
+                  return;
+                }
+                void onGoVote();
+              }}
             />
             <Text style={type.footnote}>
               {!unlocked
                 ? 'Waiting for one more person to share a thought.'
                 : myThoughts === 0
-                  ? 'Share a thought first, then you can vote on everyone else’s.'
+                  ? 'You can vote on everyone else’s thoughts, or add yours first.'
                   : 'Moves you to voting. Other people can keep sharing.'}
             </Text>
-            <Button disabled={submitting || opening} variant="secondary" label="Leave for now" onPress={onLeave} />
+            <Button disabled={submitting || opening} variant="secondary" label="Leave for now" onPress={() => router.replace('/')} />
           </View>
         ) : null}
-      </View>
+      </ScrollView>
           );
         }}
       </SeatGate>
@@ -225,11 +274,17 @@ export default function LobbyScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, padding: 20, gap: 10 },
-  wait: { ...type.section, color: colors.accentHover, marginTop: 24 },
-  closed: { ...type.footnote, color: colors.accentHover },
+  page: { padding: 20, paddingBottom: 48, gap: 10 },
+  hint: { ...controls.panel, gap: 8 },
+  wait: { ...type.section, color: colors.teal, marginTop: 24 },
+  closed: { ...type.footnote, color: colors.teal },
   label: { marginTop: 8 },
   area: { minHeight: 90, textAlignVertical: 'top' },
-  actions: { marginTop: 'auto', gap: 8 },
-  confirm: { marginTop: 'auto', ...controls.panel, gap: 10 },
+  actions: { marginTop: 12, gap: 8 },
+  board: { gap: 8 },
+  thought: {
+    ...controls.panel,
+    padding: 12,
+  },
+  thoughtText: { ...type.body, color: colors.ink },
 });

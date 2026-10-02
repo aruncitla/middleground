@@ -32,8 +32,8 @@ assert(choiceForSeat(merged, 'sAAA', 'c1') === 'disagree', 'highlight follows th
 assert(choiceForSeat(merged, 'sBBB', 'c1') === 'agree', 'the other identical seat keeps its own vote');
 
 const cards: Card[] = [
-  { id: 'c2', text: 'Later', kind: 'synthesized', order: 1, agreeCount: 0, disagreeCount: 0, createdAt: new Date('2026-01-02') },
-  { id: 'c1', text: 'Goa', kind: 'synthesized', order: 0, agreeCount: 99, disagreeCount: 99, createdAt: new Date('2026-01-01') },
+  { id: 'c2', text: 'Later', kind: 'synthesized', order: 1, agreeCount: 0, disagreeCount: 0, maybeCount: 0, createdAt: new Date('2026-01-02') },
+  { id: 'c1', text: 'Goa', kind: 'synthesized', order: 0, agreeCount: 99, disagreeCount: 99, maybeCount: 0, createdAt: new Date('2026-01-01') },
 ];
 const sorted = sortCards(cards);
 assert(sorted[0]?.id === 'c1' && sorted[1]?.id === 'c2', 'cards sort by createdAt then id');
@@ -42,6 +42,8 @@ assert(sortCards(sorted)[0]?.id === 'c1', 'sort is stable across rerenders');
 const tallied = withVoteTallies(cards, merged);
 assert(tallied.find((c) => c.id === 'c1')?.agreeCount === 1, 'UI tallies follow votes, not stale counters');
 assert(tallied.find((c) => c.id === 'c1')?.disagreeCount === 1, 'two identical-name seats both count');
+const maybeVote: Vote = { id: 'sAAA_c2', uid: 'u1', seatId: 'sAAA', cardId: 'c2', choice: 'maybe' };
+assert(withVoteTallies(cards, [maybeVote]).find((c) => c.id === 'c2')?.maybeCount === 1, 'maybe votes land in the middle bucket');
 
 const deck = ['c1', 'c2'];
 assert(!seatCompletedDeck([adaA, adaB], 'sAAA', deck), 'one card is not a finished deck');

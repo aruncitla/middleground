@@ -1,9 +1,10 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { ConsensusSummaryCard, phraseFromCardText } from '@/components/ConsensusSummaryCard';
+import { ConsensusSummaryCard } from '@/components/ConsensusSummaryCard';
 import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
+import { VoteScale } from '@/components/VoteScale';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
 import { BrandMark } from '@/components/BrandMark';
@@ -11,15 +12,15 @@ import { Button } from '@/components/Button';
 import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { CountdownPill } from '@/components/CountdownPill';
-import { seatEntryCount, votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
+import { votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
 import { isGenericFillerText } from '@/lib/cardQuality';
 import { liveDeadline } from '@/lib/formatEnds';
 import { notify } from '@/lib/notify';
 import { shareConsensusCard } from '@/lib/shareConsensus';
+import { isExampleCard } from '@/lib/starterCards';
 import { avatarById } from '@/lib/theme';
 import { containerCodeOf, closeVotingIfOpen, joinRoom, recordUnanimousAgreements, reopenThoughts, startRoundTwo } from '@/lib/roomService';
 import {
-  cardVotingComplete,
   choiceForSeat,
   rosterSeatIds,
   seatsFinishedCount,
@@ -30,37 +31,16 @@ import {
   voteScreenForSeat,
   withVoteTallies,
 } from '@/lib/voteTally';
+import { discussionScore } from '@/lib/voteChoice';
 import { colors, controls, type } from '@/lib/theme';
 import type { Card } from '@/types/room';
-
-type Bucket = 'everyone' | 'many' | 'some' | 'none';
-
-function voteTotal(card: Card) {
-  return card.agreeCount + card.disagreeCount;
-}
-
-function bucketFor(card: Card): Bucket | null {
-  const total = voteTotal(card);
-  if (total <= 0) return null;
-  if (card.agreeCount === 0) return 'none';
-  if (card.disagreeCount === 0) return 'everyone';
-  if (card.agreeCount > card.disagreeCount) return 'many';
-  return 'some';
-}
-
-const SECTIONS: { id: Bucket; title: string; hint: string; labelColor: string }[] = [
-  { id: 'everyone', title: 'Everyone agrees', hint: 'No nos.', labelColor: colors.accentHover },
-  { id: 'many', title: 'Many agree', hint: 'A majority said yes — still a split.', labelColor: colors.muted },
-  { id: 'some', title: 'Some agree', hint: 'Tied or a minority yes.', labelColor: colors.muted },
-  { id: 'none', title: 'No one agrees', hint: 'Every vote was no.', labelColor: colors.faint },
-];
 
 export default function SummaryScreen() {
   const { code: raw } = useLocalSearchParams<{ code: string }>();
   const code = String(raw ?? '').toUpperCase();
   const router = useRouter();
   const { user, loading: authLoading, error: authError } = useGuestAuth();
-  const { room, cards, participants, entries, votes, agreements, seats, ready } = useRoom(code);
+  const { room, cards, participants, entries, votes, seats, ready } = useRoom(code);
   const container = room ? containerCodeOf(room) : undefined;
   const [activeSeatId, setActiveSeatId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -74,7 +54,7 @@ export default function SummaryScreen() {
   const mergedVotes = votes;
   const talliedCards = useMemo(() => withVoteTallies(cards, mergedVotes), [cards, mergedVotes]);
   const reportCards = useMemo(
-    () => sortCards(talliedCards.filter((c) => !isGenericFillerText(c.text))),
+    () => sortCards(talliedCards.filter((c) => !isGenericFillerText(c.text) && !isExampleCard(c))),
     [talliedCards],
   );
   const cardIds = useMemo(() => reportCards.map((card) => card.id), [reportCards]);
@@ -98,41 +78,10 @@ export default function SummaryScreen() {
       return needed.length === 0 || seatCompletedDeck(mergedVotes, id, needed);
     });
   const canHostEnd = isHost && isEarly && (allVoted || voteTimedOut);
-  const grouped = useMemo(() => {
-    const next: Record<Bucket, Card[]> = { everyone: [], many: [], some: [], none: [] };
-    for (const card of reportCards) {
-      const bucket = bucketFor(card);
-      if (bucket) next[bucket].push(card);
-    }
-    return next;
-  }, [reportCards]);
-  const hasVotes = reportCards.some((c) => voteTotal(c) > 0);
+  const hasVotes = reportCards.some((c) => (c.agreeCount ?? 0) + (c.disagreeCount ?? 0) + (c.maybeCount ?? 0) > 0);
   const isFollowUp = Boolean(room?.parentRoomId);
-  const splitCount = grouped.many.length + grouped.some.length + grouped.none.length;
-  const agreedCount = grouped.everyone.length;
-  const pointCount = agreedCount + splitCount;
-  const sharePhrases = (isFollowUp ? reportCards : [...grouped.everyone, ...grouped.many, ...grouped.some, ...grouped.none])
-    .filter((c) => voteTotal(c) > 0)
-    .map((c) => ({
-      label: phraseFromCardText(c.text),
-      yes: c.agreeCount,
-      total: voteTotal(c),
-    }));
-  const finalAgreement = useMemo(() => {
-    const seen = new Set<string>();
-    const rows: { id: string; text: string; note?: string }[] = [];
-    const add = (id: string, text: string, note?: string) => {
-      const key = text.trim().toLowerCase();
-      if (!key || seen.has(key)) return;
-      seen.add(key);
-      rows.push({ id, text, note });
-    };
-    if (!isFollowUp) {
-      for (const card of grouped.everyone) add(card.id, card.text);
-      for (const item of agreements) add(item.id, item.text, item.sourceRoomId !== code ? 'from a follow-up' : undefined);
-    }
-    return rows;
-  }, [agreements, code, grouped.everyone, isFollowUp]);
+  const score = discussionScore(reportCards);
+  const people = seats.length || participants.length;
 
   const leftoverForActive = useMemo(() => {
     if (!activeSeatId) return 0;
@@ -144,19 +93,15 @@ export default function SummaryScreen() {
     if (!room) return;
     if (room.status === 'synthesizing') router.replace(`/lobby/${code}`);
     if (room.status === 'lobby' && !unlocked) router.replace(`/lobby/${code}`);
-    if (room.status === 'lobby' && activeSeatId && seatEntryCount(entries, { id: activeSeatId }) === 0) {
-      router.replace(`/lobby/${code}`);
-    }
-  }, [room, unlocked, activeSeatId, entries, code, router]);
+  }, [room, unlocked, code, router]);
 
   useEffect(() => {
     if (!votingOpen || !activeSeatId || cardIds.length === 0) return;
-    if (room?.status === 'lobby' && seatEntryCount(entries, { id: activeSeatId }) === 0) return;
     const hasStarted = seatStartedVoting(mergedVotes, activeSeatId, votableCardIdsForSeat(reportCards, entries, activeSeatId));
     if (voteScreenForSeat({ leftover: leftoverForActive, hasStarted, again: false }) === 'swipe') {
       router.replace(`/swipe/${code}`);
     }
-  }, [votingOpen, activeSeatId, leftoverForActive, cardIds, mergedVotes, entries, reportCards, room?.status, code, router]);
+  }, [votingOpen, activeSeatId, leftoverForActive, cardIds, mergedVotes, entries, reportCards, code, router]);
 
   useEffect(() => {
     if (!inPlay || !voteEnds) return;
@@ -236,79 +181,23 @@ export default function SummaryScreen() {
     }
   };
 
-  const renderCard = (
-    card: Card,
-    opts: { seatId: string; label?: string; labelColor?: string; canStart?: boolean },
-  ) => (
-    <View key={card.id} style={styles.card}>
-      {opts.label ? (
-        <Text style={[styles.kind, { color: opts.labelColor || colors.accentHover }]}>{opts.label}</Text>
-      ) : null}
-      <Text style={[styles.kind, { color: opts.labelColor || colors.accentHover }]}>
-        {card.agreeCount} yes · {card.disagreeCount} no
-      </Text>
-      {(card.sourceCount ?? card.sourceEntryIds?.length ?? 0) > 1 ? (
-        <Text style={type.footnote}>
-          {card.sourceCount ?? card.sourceEntryIds?.length} similar thoughts merged
-        </Text>
-      ) : null}
-      <Text style={styles.body}>{card.text}</Text>
-      {votingOpen ? (
-        <Text style={type.footnote}>
-          {choiceForSeat(mergedVotes, opts.seatId, card.id) === 'agree'
-            ? 'You voted yes'
-            : choiceForSeat(mergedVotes, opts.seatId, card.id) === 'disagree'
-              ? 'You voted no'
-              : 'New — not voted yet'}
-        </Text>
-      ) : opts.canStart && pendingDiscussionId === card.id ? (
-        <View style={styles.confirm}>
-          <Text style={type.footnote}>
-            Start a sub-discussion on this split? Everyone from this room is already in it.
-          </Text>
-          <View style={styles.confirmRow}>
-            <Button
-              disabled={busy}
-              variant="secondary"
-              onPress={() => setPendingDiscussionId(null)}
-              label="Not now"
-              style={styles.confirmBtn}
-            />
-            <Button
-              disabled={busy}
-              onPress={() => void onStartDiscussion(card)}
-              label={busy ? 'Starting…' : 'Start'}
-              style={styles.confirmBtn}
-            />
-          </View>
-        </View>
-      ) : opts.canStart ? (
-        <Button
-          disabled={busy}
-          variant="secondary"
-          onPress={() => setPendingDiscussionId(card.id)}
-          label="Discuss this further"
-        />
-      ) : null}
-    </View>
-  );
-
   return (
     <Screen loading={authLoading || !ready} error={authError}>
       <SeatGate
         containerCode={container}
         topicCode={code}
         uid={user?.uid}
+        required={false}
         onSeatChange={(seat) => setActiveSeatId(seat?.id ?? null)}
       >
         {(session) => {
-          const avatar = avatarById(session.seat.avatarId);
-          const seatId = session.seat.id;
+          const avatar = session.seat ? avatarById(session.seat.avatarId) : null;
+          const seatId = session.seat?.id;
           return (
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-        <BrandMark size="sm" />
+        <BrandMark size="sm" fromMark={!isEarly} />
         <RoomStageBar stage="results" />
-        <Text style={type.kicker}>{isEarly ? 'Early results' : 'Results'}</Text>
+        <Text style={type.kicker}>{isEarly ? 'Live verdict' : 'Verdict'}</Text>
         <Pressable
           onPress={() =>
             router.push(`/room/${room?.containerId || room?.parentRoomId || code}${code !== (room?.containerId || room?.parentRoomId || code) ? `?topic=${code}` : ''}`)
@@ -317,12 +206,26 @@ export default function SummaryScreen() {
         >
           <Text style={controls.ghostText}>Room home</Text>
         </Pressable>
-        <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
-          <Text style={controls.ghostText}>
-            {avatar.emoji} {session.seat.displayName} · Switch seat
-          </Text>
-        </Pressable>
+        {session.seat ? (
+          <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
+            <Text style={controls.ghostText}>
+              {avatar?.emoji} {session.seat.displayName} · Switch
+            </Text>
+          </Pressable>
+        ) : null}
         <Text style={type.title}>{room?.topic}</Text>
+        <View style={styles.scoreWrap}>
+          <Text style={styles.scoreKicker}>Discussion score</Text>
+          <Text style={styles.score}>{hasVotes ? score : '—'}</Text>
+        </View>
+        <ParticipationStats
+          participants={participants}
+          seats={session.seats}
+          entries={entries}
+          votes={mergedVotes}
+          cardIds={cardIds}
+          showVotes
+        />
         {isEarly ? (
           <>
             <Text style={type.body}>
@@ -341,24 +244,27 @@ export default function SummaryScreen() {
                       : `Voting is still open · ${waitingVote} people haven’t voted yet.`}
             </Text>
             {voteEnds ? <CountdownPill endsAt={voteEnds} /> : null}
-            <ParticipationStats
-              participants={participants}
-              seats={session.seats}
-              entries={entries}
-              votes={mergedVotes}
-              cardIds={cardIds}
-              showVotes
-            />
-            {votingOpen && leftoverForActive > 0 && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
+            {votingOpen && leftoverForActive > 0 && seatId && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
               <>
                 <Text style={type.body}>New thoughts came up for voting</Text>
                 <Button label="Swipe again" onPress={() => router.push(`/swipe/${code}?again=1`)} />
               </>
-            ) : votingOpen && leftoverForActive === 0 && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
+            ) : votingOpen && leftoverForActive === 0 && seatId && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
               <Button
                 variant="secondary"
                 label="Swipe again"
                 onPress={() => router.push(`/swipe/${code}?again=review`)}
+              />
+            ) : votingOpen && leftoverForActive > 0 ? (
+              <Button
+                label="Vote on the thoughts"
+                onPress={() => {
+                  if (!session.seat) {
+                    session.setSwitching(true);
+                    return;
+                  }
+                  router.push(`/swipe/${code}`);
+                }}
               />
             ) : null}
             {mergedVotes.length === 0 && votingOpen ? (
@@ -386,17 +292,17 @@ export default function SummaryScreen() {
             ) : null}
           </>
         ) : null}
-        {room && hasVotes && resultsLocked ? (
+
+        {room && hasVotes ? (
           <>
             <ConsensusSummaryCard
               ref={cardRef}
               topic={room.topic}
-              subtopic={isEarly ? 'Early results' : room.round > 1 ? 'Consensus report · follow-up round' : 'Consensus report'}
-              phrases={sharePhrases}
-              agreedCount={agreedCount}
-              pointCount={pointCount}
-              participantCount={seats.length || participants.length}
-              elapsedLabel={isFollowUp ? 'Follow-up session' : 'Group session'}
+              cards={reportCards}
+              votes={mergedVotes}
+              score={score}
+              participantCount={people}
+              elapsedLabel={isFollowUp ? 'Follow-up session' : 'from Middleground'}
             />
             <Button
               onPress={() => void onShare()}
@@ -404,62 +310,65 @@ export default function SummaryScreen() {
               label={sharing ? 'Preparing…' : 'Share card'}
               style={styles.share}
             />
-            <Text style={styles.shareHint}>Opens WhatsApp and other chats with a link to the app. On phones it can attach the card image too.</Text>
+            <Text style={styles.shareHint}>
+              Opens WhatsApp and other chats with a link to the app. On phones it can attach the card image too.
+            </Text>
           </>
         ) : null}
+
         {isFollowUp ? (
           <Pressable onPress={() => router.replace(`/summary/${room?.parentRoomId}`)} accessibilityRole="button">
-            <Text style={controls.ghostText}>Unanimous yeses save to the original room · Open {room?.parentRoomId}</Text>
+            <Text style={controls.ghostText}>Open {room?.parentRoomId}</Text>
           </Pressable>
         ) : null}
 
         {!hasVotes ? <Text style={type.body}>No votes yet.</Text> : null}
 
-        {finalAgreement.length > 0 && !isEarly ? (
-          <View style={styles.section}>
-            <Text style={type.section}>Final agreement</Text>
-            <Text style={type.footnote}>What the group has locked in so far.</Text>
-            {finalAgreement.map((item) => (
-              <View key={item.id} style={styles.card}>
-                {item.note ? <Text style={styles.kind}>{item.note}</Text> : (
-                  <Text style={styles.kind}>Locked in</Text>
-                )}
-                <Text style={styles.body}>{item.text}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {isEarly
-          ? reportCards.map((card) => {
-              const complete = resultsLocked || cardVotingComplete(mergedVotes, rosterIds, card.id);
-              const bucket = complete ? bucketFor(card) : null;
-              const section = bucket ? SECTIONS.find((row) => row.id === bucket) : null;
-              return renderCard(card, {
-                seatId,
-                label: section?.title,
-                labelColor: section?.labelColor,
-              });
-            })
-          : SECTIONS.map((section) => {
-          const rows = grouped[section.id];
-          if (rows.length === 0) return null;
-          if (!isFollowUp && section.id === 'everyone') return null;
-          const canStart = section.id !== 'everyone';
-          return (
-            <View key={section.id} style={styles.section}>
-              <Text style={[type.section, { color: section.labelColor }]}>{section.title}</Text>
-              <Text style={type.footnote}>{section.hint}</Text>
-              {rows.map((card) =>
-                renderCard(card, {
-                  seatId,
-                  labelColor: section.labelColor,
-                  canStart,
-                }),
-              )}
+        <View style={styles.section}>
+          {reportCards.map((card) => (
+            <View key={card.id} style={styles.card}>
+              <VoteScale card={card} votes={mergedVotes} />
+              {seatId ? (
+                <Text style={type.footnote}>
+                  {choiceForSeat(mergedVotes, seatId, card.id) === 'agree'
+                    ? 'You voted works for me'
+                    : choiceForSeat(mergedVotes, seatId, card.id) === 'disagree'
+                      ? 'You voted not for me'
+                      : choiceForSeat(mergedVotes, seatId, card.id) === 'maybe'
+                        ? 'You voted maybe'
+                        : 'You haven’t voted on this yet'}
+                </Text>
+              ) : null}
+              {resultsLocked && pendingDiscussionId === card.id ? (
+                <View style={styles.confirm}>
+                  <Text style={type.footnote}>Start a sub-discussion on this split?</Text>
+                  <View style={styles.confirmRow}>
+                    <Button
+                      disabled={busy}
+                      variant="secondary"
+                      onPress={() => setPendingDiscussionId(null)}
+                      label="Not now"
+                      style={styles.confirmBtn}
+                    />
+                    <Button
+                      disabled={busy}
+                      onPress={() => void onStartDiscussion(card)}
+                      label={busy ? 'Starting…' : 'Start'}
+                      style={styles.confirmBtn}
+                    />
+                  </View>
+                </View>
+              ) : resultsLocked ? (
+                <Button
+                  disabled={busy}
+                  variant="secondary"
+                  onPress={() => setPendingDiscussionId(card.id)}
+                  label="Discuss this further"
+                />
+              ) : null}
             </View>
-          );
-        })}
+          ))}
+        </View>
       </ScrollView>
           );
         }}
@@ -470,18 +379,29 @@ export default function SummaryScreen() {
 
 const styles = StyleSheet.create({
   page: { padding: 20, paddingBottom: 48, gap: 10 },
-  section: { gap: 8, marginTop: 8 },
+  section: { gap: 12, marginTop: 8 },
   card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
+    ...controls.panel,
     gap: 8,
-    backdropFilter: 'blur(24px)',
   },
-  kind: { ...type.kicker, color: colors.accentHover },
-  body: { ...type.section, fontSize: 16, lineHeight: 22 },
+  scoreWrap: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.28)',
+  },
+  scoreKicker: { ...type.kicker, color: colors.amber },
+  score: {
+    color: colors.ink,
+    fontSize: 52,
+    fontFamily: 'Inter',
+    fontWeight: '700',
+    letterSpacing: -1.6,
+    textShadowColor: 'rgba(245, 158, 11, 0.55)',
+    textShadowRadius: 18,
+  },
   share: {
     maxWidth: 420,
     alignSelf: 'center',
