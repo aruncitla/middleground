@@ -296,15 +296,23 @@ export default function SummaryScreen() {
 
         {room && hasVotes ? (
           <>
-            <ConsensusSummaryCard
-              ref={cardRef}
-              topic={room.topic}
-              cards={reportCards}
-              votes={mergedVotes}
-              score={score}
-              participantCount={people}
-              elapsedLabel={isFollowUp ? 'Follow-up session' : 'from Middleground'}
-            />
+            <View
+              pointerEvents="none"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={styles.offscreen}
+              {...({ 'aria-hidden': true } as object)}
+            >
+              <ConsensusSummaryCard
+                ref={cardRef}
+                topic={room.topic}
+                cards={reportCards}
+                votes={mergedVotes}
+                score={score}
+                participantCount={people}
+                elapsedLabel={isFollowUp ? 'Follow-up session' : 'from Middleground'}
+              />
+            </View>
             <Button
               onPress={() => void onShare()}
               disabled={sharing}
@@ -407,6 +415,12 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   shareHint: { ...type.footnote, maxWidth: 420, alignSelf: 'center' },
+  offscreen: {
+    position: 'absolute',
+    left: -9999,
+    top: 0,
+    width: 420,
+  },
   confirm: { gap: 8, marginTop: 4 },
   confirmRow: { flexDirection: 'row', gap: 8 },
   confirmBtn: { flex: 1 },
