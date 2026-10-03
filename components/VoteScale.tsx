@@ -20,7 +20,7 @@ export function VoteScale({ card, votes = [], compact }: Props) {
       <View style={styles.head}>
         {counts.total > 0 ? (
           <View style={styles.badge}>
-            <Text style={styles.badgeText}>{score}</Text>
+            <Text style={styles.badgeText}>{counts.total < 3 ? `${counts.total} vote${counts.total === 1 ? '' : 's'}` : score}</Text>
           </View>
         ) : null}
         <Text style={styles.question} numberOfLines={compact ? 2 : undefined}>
@@ -46,7 +46,9 @@ export function VoteScale({ card, votes = [], compact }: Props) {
         <Text style={type.footnote}>No votes yet.</Text>
       ) : !compact && counts.total ? (
         <Text style={styles.pct}>
-          {pct.agree}% {VOTE_LABELS.agree} · {pct.maybe}% {VOTE_LABELS.maybe} · {pct.disagree}% {VOTE_LABELS.disagree}
+          {counts.agree} {VOTE_LABELS.agree} · {counts.maybe} {VOTE_LABELS.maybe} · {counts.disagree} {VOTE_LABELS.disagree}
+          {' · '}
+          {pct.agree}% · {pct.maybe}% · {pct.disagree}%
         </Text>
       ) : null}
       {!compact && counts.agree > 0 && counts.disagree > 0 && counts.agree === counts.disagree ? (
@@ -80,7 +82,8 @@ const styles = StyleSheet.create({
   pct: { ...type.footnote, color: colors.muted },
   badge: {
     minWidth: 36,
-    height: 36,
+    minHeight: 36,
+    paddingHorizontal: 8,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
@@ -88,5 +91,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
-  badgeText: { ...type.kicker, color: colors.amber, fontSize: 13, fontWeight: '700' },
+  badgeText: { ...type.kicker, color: colors.amber, fontSize: 11, fontWeight: '700', textAlign: 'center' },
 });

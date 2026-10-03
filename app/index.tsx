@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -9,14 +9,14 @@ import {
   View,
 } from 'react-native';
 import { Button } from '@/components/Button';
-import { CopyButton } from '@/components/CopyButton';
 import { Screen } from '@/components/Screen';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useSavedRooms } from '@/hooks/usePastRooms';
-import { DEMO_ROOM_CODE, FEEDBACK_ROOM_CODE } from '@/lib/app';
+import { FEATURED_ROOM_CODE, FEEDBACK_ROOM_CODE } from '@/lib/app';
 import { notify } from '@/lib/notify';
-import { peekRoom } from '@/lib/roomService';
+import { loadSavedRoom, peekRoom } from '@/lib/roomService';
 import { pathForRoom } from '@/lib/roomPath';
+import { topicIsLive } from '@/lib/verdict';
 import { colors, controls, type } from '@/lib/theme';
 import type { SavedRoom } from '@/types/room';
 
@@ -37,6 +37,30 @@ export default function HomeScreen() {
   const { rooms: savedRooms, loading: roomsLoading } = useSavedRooms(user?.uid);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [featuredLive, setFeaturedLive] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const room = await peekRoom(FEATURED_ROOM_CODE);
+        if (!room || cancelled) return;
+        const group = room.kind === 'group' || (!room.kind && !room.parentRoomId && !room.containerId);
+        if (group) {
+          const saved = await loadSavedRoom(FEATURED_ROOM_CODE);
+          if (cancelled) return;
+          setFeaturedLive(Boolean(saved?.liveTopic) || topicIsLive(room.status));
+        } else {
+          setFeaturedLive(topicIsLive(room.status));
+        }
+      } catch {
+        if (!cancelled) setFeaturedLive(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onJoin = async () => {
     if (!user) {
@@ -76,8 +100,13 @@ export default function HomeScreen() {
             onPress={() => router.push('/new')}
             label="Start a topic"
           />
-          <Pressable onPress={() => router.push(`/summary/${DEMO_ROOM_CODE}`)} accessibilityRole="button">
-            <Text style={controls.ghostText}>See a live debate</Text>
+          <Pressable
+            onPress={() =>
+              router.push(featuredLive ? `/room/${FEATURED_ROOM_CODE}` : `/summary/${FEATURED_ROOM_CODE}`)
+            }
+            accessibilityRole="button"
+          >
+            <Text style={controls.ghostText}>{featuredLive ? 'See a live debate' : 'See a sample verdict'}</Text>
           </Pressable>
           <Pressable onPress={() => router.push(`/room/${FEEDBACK_ROOM_CODE}`)} accessibilityRole="button">
             <Text style={controls.ghostText}>Give feedback</Text>
@@ -97,7 +126,6 @@ export default function HomeScreen() {
             {...({ dataSet: { mgInput: 'code' } } as object)}
           />
           <Button disabled={busy} onPress={() => void onJoin()} variant="secondary" label="Join room" />
-          <CopyButton value={code} />
         </View>
 
         <View style={controls.panel}>

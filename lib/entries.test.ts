@@ -1,4 +1,4 @@
-import { entryBelongsToSeat, mergeLiveEntries, seatEntryCount, seatsThatShared, sharingSeatCount, thoughtCount, votableCardIdsForSeat, votingUnlocked } from './entries';
+import { entryBelongsToSeat, mergeLiveEntries, seatEntryCount, seatsThatShared, sharingSeatCount, thoughtCount, thoughtDeck, votableCardIdsForSeat, votingUnlocked } from './entries';
 import type { Entry, Seat } from '@/types/room';
 
 function assert(cond: unknown, msg: string) {
@@ -26,6 +26,8 @@ assert(thoughtCount([...entries, { id: 'e4', authorId: 'u1', text: '   ' }]) ===
 assert(sharingSeatCount(entries) === 3, 'sharing count is unique seats, not thought count');
 assert(!votingUnlocked(entries.slice(0, 1)), 'one seat cannot open voting');
 assert(votingUnlocked(entries.slice(0, 2)), 'two seats with thoughts open voting');
+assert(votingUnlocked(entries.slice(0, 1), { authorOnlyThoughts: true }), 'author-led rooms open voting after one thought');
+assert(!votingUnlocked([], { authorOnlyThoughts: true }), 'author-led rooms still need a thought');
 assert(
   mergeLiveEntries(entries.slice(0, 1), []).map((row) => row.id).join(',') === 'e1',
   'a just-submitted thought is not dropped if the live list has not caught up',
@@ -48,6 +50,13 @@ assert(
     's1',
   ).join(',') === 'e2',
   'you do not vote on your own thought',
+);
+assert(
+  thoughtDeck(
+    [{ id: 'e1', text: 'one', kind: 'synthesized', order: 0, agreeCount: 0, disagreeCount: 0, maybeCount: 0, sourceEntryIds: ['e1'] }],
+    entries,
+  ).map((row) => row.id).join(',') === 'e1,e2,e3',
+  'swipe deck includes thoughts that do not have a card yet',
 );
 
 console.log('entry tests ok');

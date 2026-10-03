@@ -2,7 +2,8 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/Button';
-import { CopyButton } from '@/components/CopyButton';
+import { AuthorOnlyToggle } from '@/components/AuthorOnlyToggle';
+import { RoomCodeRow } from '@/components/RoomCodeRow';
 import { RoomInviteCard } from '@/components/RoomInviteCard';
 import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
@@ -12,7 +13,7 @@ import { roomShareUrl } from '@/lib/app';
 import { notify } from '@/lib/notify';
 import { avatarById } from '@/lib/theme';
 import { pathForRoom } from '@/lib/roomPath';
-import { loadSavedRoom, renameRoom } from '@/lib/roomService';
+import { isRoomAuthor, loadSavedRoom, renameRoom, setAuthorOnlyThoughts } from '@/lib/roomService';
 import { shareRoomInviteCard } from '@/lib/shareConsensus';
 import { topicIsLive } from '@/lib/verdict';
 import { colors, controls, type } from '@/lib/theme';
@@ -148,12 +149,13 @@ export default function RoomHomeScreen() {
               ) : (
                 <>
                   <Text style={type.title}>{saved?.name}</Text>
+                  {saved?.authorOnlyThoughts ? <Text style={styles.led}>Author-led</Text> : null}
                   <Pressable onPress={() => setRenaming(true)} accessibilityRole="button">
                     <Text style={controls.ghostText}>Rename room</Text>
                   </Pressable>
                 </>
               )}
-              <Text style={styles.code}>{saved?.code}</Text>
+              {saved?.code && shareUrl ? <RoomCodeRow code={saved.code} url={shareUrl} /> : saved?.code ? <Text style={styles.code}>{saved.code}</Text> : null}
               {saved?.created ? <Text style={type.footnote}>Created {formatDate(saved.created)}</Text> : null}
               {session.seat ? (
                 <Text style={type.footnote}>
@@ -167,7 +169,6 @@ export default function RoomHomeScreen() {
               <Pressable onPress={() => session.setSwitching(true)} accessibilityRole="button">
                 <Text style={controls.ghostText}>Switch seat</Text>
               </Pressable>
-              {shareUrl ? <CopyButton value={shareUrl} label="Copy room link" /> : null}
               <Button
                 label={sharing ? 'Preparing…' : 'Share invite card'}
                 onPress={() => void onShareInvite()}
@@ -209,6 +210,36 @@ export default function RoomHomeScreen() {
                   </View>
                 ))}
               </View>
+
+              {isRoomAuthor(saved, session.seat?.id, user?.uid) ? (
+                <View style={controls.panel}>
+                  <Text style={type.section}>Room settings</Text>
+                  <AuthorOnlyToggle
+                    value={Boolean(saved?.authorOnlyThoughts)}
+                    onChange={(next) => {
+                      const seat = session.seat;
+                      if (!saved || !seat) {
+                        session.setSwitching(true);
+                        return;
+                      }
+                      void (async () => {
+                        try {
+                          await setAuthorOnlyThoughts(saved.code, {
+                            authorOnlyThoughts: next,
+                            createdByParticipantId: saved.createdByParticipantId || seat.id,
+                            createdByName: saved.createdByName || seat.displayName,
+                            createdByEmoji: saved.createdByEmoji || avatarById(seat.avatarId).emoji,
+                          });
+                          const latest = await loadSavedRoom(saved.code);
+                          setSaved(latest);
+                        } catch (e) {
+                          notify('Could not update room', e instanceof Error ? e.message : String(e));
+                        }
+                      })();
+                    }}
+                  />
+                </View>
+              ) : null}
 
               {isHost ? (
                 <View style={controls.panel}>
@@ -302,6 +333,17 @@ const styles = StyleSheet.create({
   page: { paddingBottom: 48, gap: 10 },
   rename: { gap: 8 },
   code: { ...type.code },
+  led: {
+    ...type.kicker,
+    alignSelf: 'flex-start',
+    color: colors.teal,
+    textTransform: 'uppercase',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
   shareHint: { ...type.footnote, maxWidth: 420, alignSelf: 'center' },
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   stat: {

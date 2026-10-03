@@ -23,6 +23,10 @@ export type Room = {
   closedBy?: string;
   closeReason?: CloseReason;
   createdAt?: Date;
+  authorOnlyThoughts?: boolean;
+  createdByParticipantId?: string;
+  createdByName?: string;
+  createdByEmoji?: string;
 };
 
 export type Participant = {
@@ -125,6 +129,10 @@ export type SavedRoom = {
   weekStreak: number;
   liveTopic?: TopicPreview;
   pastTopics: TopicPreview[];
+  authorOnlyThoughts?: boolean;
+  createdByParticipantId?: string;
+  createdByName?: string;
+  createdByEmoji?: string;
   /** True when this row is a local placeholder waiting on a real Firestore load. */
   pending?: boolean;
 };

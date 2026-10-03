@@ -1,15 +1,16 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AuthorOnlyToggle } from '@/components/AuthorOnlyToggle';
 import { Button } from '@/components/Button';
 import { PromptPacks } from '@/components/PromptPacks';
 import { Screen } from '@/components/Screen';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { notify } from '@/lib/notify';
 import { loadProfile, saveProfile } from '@/lib/profileLocal';
-import { CLOSE_WINDOWS, createRoom, createSeat, createTopicInRoom, joinRoom, isSeatTakenError, peekRoom, rememberJoinedRoom, DEFAULT_CLOSE_WINDOW } from '@/lib/roomService';
+import { CLOSE_WINDOWS, createRoom, createSeat, createTopicInRoom, joinRoom, isSeatTakenError, peekRoom, rememberJoinedRoom, setAuthorOnlyThoughts, DEFAULT_CLOSE_WINDOW } from '@/lib/roomService';
 import type { TopicMode } from '@/lib/promptPacks';
-import { colors, controls, type } from '@/lib/theme';
+import { avatarById, colors, controls, type } from '@/lib/theme';
 import type { CloseWindowId } from '@/types/room';
 
 const MODES: { id: TopicMode; label: string }[] = [
@@ -32,6 +33,7 @@ export default function NewTopicScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [closeWindow, setCloseWindow] = useState<CloseWindowId>(DEFAULT_CLOSE_WINDOW);
   const [mode, setMode] = useState<TopicMode>('debate');
+  const [authorOnly, setAuthorOnly] = useState(false);
 
   useEffect(() => {
     const stored = loadProfile();
@@ -63,19 +65,37 @@ export default function NewTopicScreen() {
     try {
       const avatarId = storedProfile.avatarId || 'fox';
       saveProfile({ name: seatName, avatarId });
+      const extras = authorOnly ? { authorOnlyThoughts: true as const } : {};
       const code = inRoom
-        ? await createTopicInRoom(container, user.uid, text, { closeWindow, mode: nextMode })
+        ? await createTopicInRoom(container, user.uid, text, {
+            closeWindow,
+            mode: nextMode,
+            ...extras,
+          })
         : await createRoom(user.uid, text, {
             closeWindow,
             mode: nextMode,
             kind: 'group',
             name: roomName.trim(),
+            ...extras,
           });
       await joinRoom(code, user.uid, seatName, avatarId);
+      let seat;
       try {
-        await createSeat(inRoom ? container : code, user.uid, seatName, avatarId);
+        seat = await createSeat(inRoom ? container : code, user.uid, seatName, avatarId);
       } catch (e) {
         if (!isSeatTakenError(e)) throw e;
+        seat = e.seat;
+      }
+      try {
+        await setAuthorOnlyThoughts(code, {
+          authorOnlyThoughts: authorOnly,
+          createdByParticipantId: seat.id,
+          createdByName: seat.displayName,
+          createdByEmoji: avatarById(seat.avatarId).emoji,
+        });
+      } catch (e) {
+        if (authorOnly) throw e;
       }
       if (inRoom) await joinRoom(container, user.uid, seatName, avatarId).catch(() => {});
       const created = await peekRoom(inRoom ? container : code);
@@ -104,6 +124,8 @@ export default function NewTopicScreen() {
         </Text>
 
         {formError ? <Text style={styles.error}>{formError}</Text> : null}
+
+        <AuthorOnlyToggle value={authorOnly} onChange={setAuthorOnly} />
 
         <Text style={[type.label, styles.label]}>Your name</Text>
         <TextInput

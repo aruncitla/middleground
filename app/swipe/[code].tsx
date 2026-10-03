@@ -9,18 +9,21 @@ import { RangeStrip } from '@/components/RangeStrip';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
+import { SimilarThoughtPanel } from '@/components/SimilarThoughtPanel';
 import { SwipeCard } from '@/components/SwipeCard';
 import { TopicCard } from '@/components/TopicCard';
 import { VoteButtons } from '@/components/VoteButtons';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
-import { cardOwnedBySeat, ownEntryIdsForSeat, votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
+import { cardOwnedBySeat, ownEntryIdsForSeat, thoughtDeck, votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
 import { isGenericFillerText } from '@/lib/cardQuality';
 import { orderByIds, sessionShuffleSeed, shuffleIds } from '@/lib/deckShuffle';
 import { liveDeadline } from '@/lib/formatEnds';
 import { notify } from '@/lib/notify';
+import { findSimilarThought, type SimilarMatch } from '@/lib/similarThought';
 import { isExampleCard, withStarterCards } from '@/lib/starterCards';
+import { clearSwipeAgain, isSwipeAgain } from '@/lib/swipeAgain';
 import { avatarById, colors, controls, type } from '@/lib/theme';
-import { containerCodeOf, castVote, closeVotingIfOpen, ensureVoteDeadline, markFinishedSwiping, submitEntry } from '@/lib/roomService';
+import { containerCodeOf, castVote, closeVotingIfOpen, ensureCardsFromEntries, ensureVoteDeadline, isRoomAuthor, markFinishedSwiping, submitEntry } from '@/lib/roomService';
 import { useRoom } from '@/hooks/useRoom';
 import {
   choiceForSeat,
@@ -37,11 +40,16 @@ import type { VoteChoice } from '@/lib/voteChoice';
 import type { Card, Vote } from '@/types/room';
 
 export default function SwipeCardScreen() {
-  const { code: raw, again: rawAgain } = useLocalSearchParams<{ code: string; again?: string }>();
+  const { code: raw, again: rawAgain, focus: rawFocus } = useLocalSearchParams<{
+    code: string;
+    again?: string;
+    focus?: string;
+  }>();
   const code = String(raw ?? '').toUpperCase();
   const againParam = Array.isArray(rawAgain) ? rawAgain[0] : String(rawAgain ?? '');
-  const swipeAgain = againParam === '1';
-  const reviewVotes = againParam === 'review';
+  const focusId = String(Array.isArray(rawFocus) ? rawFocus[0] : rawFocus ?? '');
+  const [fullPass, setFullPass] = useState(() => againParam === '1' || againParam === 'review' || isSwipeAgain(code));
+  const swipeAgain = fullPass || againParam === '1' || againParam === 'review' || isSwipeAgain(code);
   const router = useRouter();
   const { user, loading: authLoading, error: authError } = useGuestAuth();
   const { room, participants, entries, cards, votes, seats, ready, rememberEntry } = useRoom(code);
@@ -55,20 +63,26 @@ export default function SwipeCardScreen() {
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [similar, setSimilar] = useState<SimilarMatch | null>(null);
   const [drag, setDrag] = useState({ x: 0, y: 0 });
   const [now, setNow] = useState(Date.now());
   const endingRef = useRef(false);
+  const draftRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (againParam === '1' || againParam === 'review' || isSwipeAgain(code)) setFullPass(true);
+  }, [againParam, code]);
 
   useEffect(() => {
     setLocalVotes([]);
     setReviewedIds([]);
-    setReopenedId(null);
-  }, [code, againParam]);
+    setReopenedId(focusId || null);
+  }, [code, againParam, focusId]);
 
   const mergedVotes = useMemo(() => mergeVotes(votes, localVotes), [votes, localVotes]);
   const genuineCards = useMemo(
-    () => sortCards(cards.filter((c) => !isGenericFillerText(c.text) && !isExampleCard(c))),
-    [cards],
+    () => sortCards(thoughtDeck(cards, entries).filter((c) => !isGenericFillerText(c.text) && !isExampleCard(c))),
+    [cards, entries],
   );
   const shuffled = useMemo(() => {
     const withExamples = withStarterCards(genuineCards, room?.topic ?? '').filter(
@@ -78,14 +92,23 @@ export default function SwipeCardScreen() {
       withExamples.map((card) => card.id),
       sessionShuffleSeed(code),
     );
-    return orderByIds(withExamples, ids);
-  }, [genuineCards, room?.topic, dismissedExamples, code]);
+    const pin = [reopenedId, focusId].find((id) => id && ids.includes(id));
+    const focused = pin ? [pin, ...ids.filter((id) => id !== pin)] : ids;
+    return orderByIds(withExamples, focused);
+  }, [genuineCards, room?.topic, dismissedExamples, code, focusId, reopenedId]);
   const cardIds = useMemo(() => genuineCards.map((card) => card.id), [genuineCards]);
   const rosterIds = useMemo(() => rosterSeatIds(seats, participants), [seats, participants]);
   const ownEntryIds = useMemo(() => ownEntryIdsForSeat(entries, activeSeatId), [entries, activeSeatId]);
   const votableCards = useMemo(
-    () => shuffled.filter((card) => isExampleCard(card) || !cardOwnedBySeat(card, ownEntryIds)),
-    [shuffled, ownEntryIds],
+    () =>
+      shuffled.filter(
+        (card) =>
+          isExampleCard(card) ||
+          !cardOwnedBySeat(card, ownEntryIds) ||
+          card.id === focusId ||
+          card.id === reopenedId,
+      ),
+    [shuffled, ownEntryIds, focusId, reopenedId],
   );
   const leftoverForActive = useMemo(() => {
     if (!activeSeatId) return votableCards.filter((card) => !isExampleCard(card)).length;
@@ -94,8 +117,8 @@ export default function SwipeCardScreen() {
   const hasStarted = Boolean(
     activeSeatId && seatStartedVoting(mergedVotes, activeSeatId, votableCardIdsForSeat(genuineCards, entries, activeSeatId)),
   );
-  const unlocked = votingUnlocked(entries);
-  const inPlay = room?.status === 'swiping' || (room?.status === 'lobby' && unlocked);
+  const unlocked = votingUnlocked(entries, { authorOnlyThoughts: room?.authorOnlyThoughts });
+  const inPlay = room?.status === 'swiping' || (room?.status === 'lobby' && (unlocked || Boolean(focusId)));
 
   const cardIsMine = (card: Card | undefined) => Boolean(card && cardOwnedBySeat(card, ownEntryIds));
   const isHost = Boolean(user && room && user.uid === room.hostId);
@@ -113,9 +136,14 @@ export default function SwipeCardScreen() {
   useEffect(() => {
     if (!room) return;
     if (room.status === 'synthesizing') router.replace(`/lobby/${code}`);
-    if (room.status === 'lobby' && !unlocked) router.replace(`/lobby/${code}`);
+    if (room.status === 'lobby' && !unlocked && !focusId) router.replace(`/lobby/${code}`);
     if (room.status === 'summary') router.replace(`/summary/${code}`);
   }, [room, unlocked, code, router]);
+
+  useEffect(() => {
+    if (!code) return;
+    void ensureCardsFromEntries(code).catch(() => {});
+  }, [code, entries.length]);
 
   useEffect(() => {
     if (room?.status !== 'swiping') return;
@@ -143,19 +171,17 @@ export default function SwipeCardScreen() {
 
   useEffect(() => {
     if (!votingOpen || !activeSeatId || reopenedId) return;
-    if (reviewVotes) {
-      if (!hasStarted) return;
-      const reviewLeft = votableCards.filter(
-        (card) =>
-          !isExampleCard(card) &&
-          choiceForSeat(mergedVotes, activeSeatId, card.id) &&
-          !reviewedIds.includes(card.id),
-      );
-      if (reviewLeft.length === 0) router.replace(`/summary/${code}`);
+    if (swipeAgain) {
+      const passLeft = genuineCards.filter((card) => !reviewedIds.includes(card.id));
+      if (reviewedIds.length > 0 && passLeft.length === 0) {
+        clearSwipeAgain(code);
+        setFullPass(false);
+        router.replace(`/summary/${code}`);
+      }
       return;
     }
     if (leftoverForActive === 0 && votableCards.filter((c) => !isExampleCard(c)).length === 0 && !hasStarted) return;
-    const screen = voteScreenForSeat({ leftover: leftoverForActive, hasStarted, again: swipeAgain });
+    const screen = voteScreenForSeat({ leftover: leftoverForActive, hasStarted, again: false });
     if (screen === 'summary') router.replace(`/summary/${code}`);
   }, [
     votingOpen,
@@ -164,10 +190,10 @@ export default function SwipeCardScreen() {
     votableCards,
     hasStarted,
     swipeAgain,
-    reviewVotes,
     reviewedIds,
     mergedVotes,
     reopenedId,
+    genuineCards,
     code,
     router,
   ]);
@@ -185,13 +211,13 @@ export default function SwipeCardScreen() {
     setReopenedId(null);
     const nextVote = optimisticVote({ uid: user.uid, seatId: sid, cardId: card.id, choice });
     setLocalVotes((prev) => mergeVotes(prev, [nextVote]));
-    if (reviewVotes) setReviewedIds((prev) => (prev.includes(card.id) ? prev : [...prev, card.id]));
+    if (swipeAgain) setReviewedIds((prev) => (prev.includes(card.id) ? prev : [...prev, card.id]));
     setDrag({ x: 0, y: 0 });
     try {
       await castVote(code, user.uid, card.id, choice, sid);
     } catch (e) {
       setLocalVotes((prev) => prev.filter((v) => voteKey(v) !== voteKey(nextVote)));
-      if (reviewVotes) setReviewedIds((prev) => prev.filter((id) => id !== card.id));
+      if (swipeAgain) setReviewedIds((prev) => prev.filter((id) => id !== card.id));
       notify('Vote failed', e instanceof Error ? e.message : String(e));
     }
   };
@@ -208,19 +234,34 @@ export default function SwipeCardScreen() {
     }
   };
 
-  const onSubmitThought = async (seatId: string) => {
+  const onSubmitThought = async (seatId: string, force = false) => {
     if (!user) return;
+    if (!force) {
+      const match = findSimilarThought(draft, entries);
+      if (match) {
+        setSimilar(match);
+        setComposerOpen(true);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const created = await submitEntry(code, user.uid, draft, seatId);
       rememberEntry(created);
       setDraft('');
+      setSimilar(null);
       setComposerOpen(false);
     } catch (e) {
       notify('Could not submit', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const onVoteTheirs = () => {
+    setSimilar(null);
+    setComposerOpen(true);
+    requestAnimationFrame(() => draftRef.current?.focus());
   };
 
   return (
@@ -234,12 +275,17 @@ export default function SwipeCardScreen() {
       >
         {(session) => {
           const avatar = session.seat ? avatarById(session.seat.avatarId) : null;
-          const remaining = reviewVotes
-            ? votableCards.filter(
-                (card) =>
-                  Boolean(choiceForSeat(mergedVotes, session.seat?.id, card.id)) &&
-                  !reviewedIds.includes(card.id),
-              )
+          const remaining = swipeAgain
+            ? (() => {
+                const unvoted: typeof genuineCards = [];
+                const voted: typeof genuineCards = [];
+                for (const card of genuineCards) {
+                  if (reviewedIds.includes(card.id)) continue;
+                  if (choiceForSeat(mergedVotes, session.seat?.id, card.id)) voted.push(card);
+                  else unvoted.push(card);
+                }
+                return [...unvoted, ...voted];
+              })()
             : votableCards.filter((card) => {
                 if (reopenedId && card.id === reopenedId) return true;
                 const choice = choiceForSeat(mergedVotes, session.seat?.id, card.id);
@@ -313,7 +359,7 @@ export default function SwipeCardScreen() {
                       ? `${top.sourceCount ?? top.sourceEntryIds?.length} people`
                       : 'From the group'
                 }
-                priorChoice={reviewVotes ? priorChoice : undefined}
+                priorChoice={swipeAgain ? priorChoice : undefined}
                 onDrag={(dx, dy) => setDrag({ x: dx, y: dy })}
                 onVote={(c) => onPick(c)}
               />
@@ -339,11 +385,50 @@ export default function SwipeCardScreen() {
           )}
         </View>
 
-        {room?.status === 'lobby' && votingOpen ? (
+        {room?.status === 'lobby' && votingOpen && (!room.authorOnlyThoughts || isRoomAuthor(room, session.seat?.id, user?.uid)) ? (
           <View style={styles.composer}>
+            {similar ? (
+              <SimilarThoughtPanel
+                kind={similar.kind}
+                thought={similar.entry.text}
+                author={
+                  similar.entry.seatId
+                    ? (() => {
+                        const seat = (session.seats || seats).find((row) => row.id === similar.entry.seatId);
+                        if (seat) return `${avatarById(seat.avatarId).emoji} ${seat.displayName}`;
+                        const person = participants.find((row) => row.id === similar.entry.authorId);
+                        if (person) return `${avatarById(person.avatarId).emoji} ${person.displayName}`;
+                        return 'Someone in the room';
+                      })()
+                    : (() => {
+                        const person = participants.find((row) => row.id === similar.entry.authorId);
+                        if (person) return `${avatarById(person.avatarId).emoji} ${person.displayName}`;
+                        return 'Someone in the room';
+                      })()
+                }
+                onVoteTheirs={onVoteTheirs}
+                onAddAnyway={
+                  similar.kind === 'exact'
+                    ? undefined
+                    : () => {
+                        if (!session.seat) {
+                          needIdentity();
+                          return;
+                        }
+                        void onSubmitThought(session.seat.id, true);
+                      }
+                }
+                onEditMine={() => {
+                  setSimilar(null);
+                  setComposerOpen(true);
+                  requestAnimationFrame(() => draftRef.current?.focus());
+                }}
+              />
+            ) : null}
             {composerOpen ? (
               <>
                 <TextInput
+                  ref={draftRef}
                   value={draft}
                   onChangeText={setDraft}
                   placeholder="Add your thought"

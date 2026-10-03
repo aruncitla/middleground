@@ -1,4 +1,4 @@
-import type { Entry, Seat } from '@/types/room';
+import type { Card, Entry, Seat } from '@/types/room';
 
 export function entryBelongsToSeat(entry: Pick<Entry, 'authorId' | 'seatId'>, seat: Pick<Seat, 'id'>) {
   if (entry.seatId) return entry.seatId === seat.id;
@@ -29,7 +29,11 @@ export function sharingSeatCount(entries: Pick<Entry, 'authorId' | 'seatId' | 't
   return ids.size;
 }
 
-export function votingUnlocked(entries: Pick<Entry, 'authorId' | 'seatId' | 'text'>[]) {
+export function votingUnlocked(
+  entries: Pick<Entry, 'authorId' | 'seatId' | 'text'>[],
+  opts?: { authorOnlyThoughts?: boolean },
+) {
+  if (opts?.authorOnlyThoughts) return thoughtCount(entries) > 0;
   return sharingSeatCount(entries) >= VOTE_UNLOCK_SEATS;
 }
 
@@ -44,8 +48,42 @@ export function ownEntryIdsForSeat(entries: Entry[], seatId: string | null) {
   return new Set(entries.filter((entry) => entryBelongsToSeat(entry, { id: seatId })).map((entry) => entry.id));
 }
 
-export function cardOwnedBySeat(card: { sourceEntryIds?: string[] }, ownEntryIds: Set<string>) {
-  return Boolean(card.sourceEntryIds?.some((id) => ownEntryIds.has(id)));
+export function cardOwnedBySeat(card: { id?: string; sourceEntryIds?: string[] }, ownEntryIds: Set<string>) {
+  if (card.sourceEntryIds?.some((id) => ownEntryIds.has(id))) return true;
+  return Boolean(card.id && ownEntryIds.has(card.id));
+}
+
+/** One swipe card per live thought, so new entries show up even before Firestore cards catch up. */
+export function thoughtDeck(cards: Card[], entries: Entry[]): Card[] {
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  const deck: Card[] = [];
+  const used = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.text.trim()) continue;
+    const existing = byId.get(entry.id);
+    if (existing) {
+      deck.push(existing);
+    } else {
+      deck.push({
+        id: entry.id,
+        text: entry.text,
+        kind: 'synthesized',
+        order: deck.length,
+        agreeCount: 0,
+        disagreeCount: 0,
+        maybeCount: 0,
+        sourceEntryIds: [entry.id],
+        sourceCount: 1,
+      });
+    }
+    used.add(entry.id);
+  }
+  for (const card of cards) {
+    if (used.has(card.id)) continue;
+    if (card.sourceEntryIds?.some((id) => used.has(id))) continue;
+    deck.push(card);
+  }
+  return deck;
 }
 
 export function votableCardIdsForSeat(

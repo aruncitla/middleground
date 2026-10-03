@@ -136,6 +136,10 @@ export async function createRoom(
     kind?: RoomKind;
     containerId?: string;
     mode?: TopicMode;
+    authorOnlyThoughts?: boolean;
+    createdByParticipantId?: string;
+    createdByName?: string;
+    createdByEmoji?: string;
   },
 ): Promise<string> {
   const trimmed = topic.trim();
@@ -164,6 +168,10 @@ export async function createRoom(
       ...(extras?.containerId ? { containerId: extras.containerId } : {}),
       ...(extras?.parentRoomId ? { parentRoomId: extras.parentRoomId } : {}),
       ...(extras?.parentCardId ? { parentCardId: extras.parentCardId } : {}),
+      ...(typeof extras?.authorOnlyThoughts === 'boolean' ? { authorOnlyThoughts: extras.authorOnlyThoughts } : {}),
+      ...(extras?.createdByParticipantId ? { createdByParticipantId: extras.createdByParticipantId } : {}),
+      ...(extras?.createdByName ? { createdByName: extras.createdByName.slice(0, 40) } : {}),
+      ...(extras?.createdByEmoji ? { createdByEmoji: extras.createdByEmoji.slice(0, 8) } : {}),
     });
     if (kind === 'group') {
       try {
@@ -205,7 +213,14 @@ export async function createTopicInRoom(
   containerCode: string,
   hostId: string,
   prompt: string,
-  extras?: { closeWindow?: CloseWindowId; mode?: TopicMode },
+  extras?: {
+    closeWindow?: CloseWindowId;
+    mode?: TopicMode;
+    authorOnlyThoughts?: boolean;
+    createdByParticipantId?: string;
+    createdByName?: string;
+    createdByEmoji?: string;
+  },
 ) {
   const next = await createRoom(hostId, prompt, {
     kind: 'topic',
@@ -213,6 +228,10 @@ export async function createTopicInRoom(
     closeWindow: extras?.closeWindow,
     mode: extras?.mode,
     round: 1,
+    authorOnlyThoughts: extras?.authorOnlyThoughts,
+    createdByParticipantId: extras?.createdByParticipantId,
+    createdByName: extras?.createdByName,
+    createdByEmoji: extras?.createdByEmoji,
   });
   await copyParticipants(containerCode, next);
   await setDoc(doc(getDb(), 'rooms', containerCode, 'topics', next), {
@@ -227,6 +246,49 @@ export async function renameRoom(code: string, name: string) {
   const trimmed = name.trim().slice(0, 80);
   if (!trimmed) throw new Error('Name is required');
   await updateDoc(roomRef(code), { name: trimmed });
+}
+
+export function isRoomAuthor(
+  room: Pick<Room, 'hostId' | 'createdByParticipantId'> | null | undefined,
+  seatId?: string | null,
+  uid?: string | null,
+) {
+  if (!room) return false;
+  if (room.createdByParticipantId) return Boolean(seatId && seatId === room.createdByParticipantId);
+  return Boolean(uid && uid === room.hostId);
+}
+
+export async function setAuthorOnlyThoughts(
+  code: string,
+  opts: {
+    authorOnlyThoughts: boolean;
+    createdByParticipantId: string;
+    createdByName: string;
+    createdByEmoji: string;
+  },
+) {
+  const payload = {
+    authorOnlyThoughts: opts.authorOnlyThoughts,
+    createdByParticipantId: opts.createdByParticipantId,
+    createdByName: opts.createdByName.trim().slice(0, 40),
+    createdByEmoji: opts.createdByEmoji.trim().slice(0, 8),
+  };
+  const room = await peekRoom(code);
+  if (!room) throw new Error('Room not found');
+  const container = containerCodeOf(room);
+  const targets = new Set<string>([code]);
+  if (container === code) {
+    const topicCodes = await loadTopicCodes(container);
+    await Promise.all(
+      topicCodes.map(async (id) => {
+        const topic = await peekRoom(id);
+        if (topic && topicIsLive(topic.status)) targets.add(id);
+      }),
+    );
+  } else if (opts.authorOnlyThoughts) {
+    targets.add(container);
+  }
+  await Promise.all([...targets].map((id) => updateDoc(roomRef(id), payload)));
 }
 
 export async function loadAdminToken(code: string): Promise<string | null> {
@@ -393,6 +455,14 @@ export async function submitEntry(code: string, uid: string, text: string, seatI
   if (!roomSnap.exists()) throw new Error('Room not found');
   const room = roomSnap.data() as Room;
   if (room.status !== 'lobby') throw new Error('Submissions are closed');
+  if (room.authorOnlyThoughts) {
+    const authorId = room.createdByParticipantId;
+    if (authorId) {
+      if (seatId !== authorId) throw new Error('Only the room author can add thoughts');
+    } else if (uid !== room.hostId) {
+      throw new Error('Only the room author can add thoughts');
+    }
+  }
   const limit = typeof room.entryLimit === 'number' ? room.entryLimit : DEFAULT_ENTRY_LIMIT;
   const existing = await getDocs(collection(db, 'rooms', code, 'entries'));
   const used = existing.docs.filter((d) => {
@@ -408,6 +478,15 @@ export async function submitEntry(code: string, uid: string, text: string, seatI
     if (!latest.exists()) throw new Error('Room not found');
     if (!pSnap.exists()) throw new Error('Join the room first');
     if ((latest.data() as Room).status !== 'lobby') throw new Error('Submissions are closed');
+    const latestRoom = latest.data() as Room;
+    if (latestRoom.authorOnlyThoughts) {
+      const authorId = latestRoom.createdByParticipantId;
+      if (authorId) {
+        if (seatId !== authorId) throw new Error('Only the room author can add thoughts');
+      } else if (uid !== latestRoom.hostId) {
+        throw new Error('Only the room author can add thoughts');
+      }
+    }
     const participant = pSnap.data() as Participant;
     tx.set(entryRef, {
       authorId: uid,
@@ -426,7 +505,28 @@ export async function submitEntry(code: string, uid: string, text: string, seatI
     ...(seatId ? { seatId } : {}),
   };
   void ensureCardForEntry(code, { id: created.id, text: created.text }).catch(() => {});
+  if (room.authorOnlyThoughts && !room.createdByParticipantId && uid === room.hostId && seatId) {
+    const person = await getDoc(pRef);
+    const avatar = String((person.data() as Participant | undefined)?.avatarId || 'fox');
+    await setAuthorOnlyThoughts(code, {
+      authorOnlyThoughts: true,
+      createdByParticipantId: seatId,
+      createdByName: String((person.data() as Participant | undefined)?.displayName || 'Host'),
+      createdByEmoji: avatar.slice(0, 8),
+    }).catch(() => {});
+  }
   return created;
+}
+
+export async function cardIdForThought(code: string, entryId: string) {
+  await ensureCardsFromEntries(code);
+  const snap = await getDocs(collection(getDb(), 'rooms', code, 'cards'));
+  for (const row of snap.docs) {
+    if (row.id === entryId) return row.id;
+    const sources = row.data().sourceEntryIds;
+    if (Array.isArray(sources) && sources.includes(entryId)) return row.id;
+  }
+  return entryId;
 }
 
 export async function ensureCardForEntry(code: string, entry: { id: string; text: string }) {
@@ -453,16 +553,7 @@ export async function ensureCardsFromEntries(code: string) {
     getDocs(collection(db, 'rooms', code, 'entries')),
     getDocs(collection(db, 'rooms', code, 'cards')),
   ]);
-  const already = new Set<string>();
-  for (const row of cardSnap.docs) {
-    already.add(row.id);
-    const sources = row.data().sourceEntryIds;
-    if (Array.isArray(sources)) {
-      for (const id of sources) {
-        if (typeof id === 'string') already.add(id);
-      }
-    }
-  }
+  const already = new Set(cardSnap.docs.map((row) => row.id));
   for (const row of entrySnap.docs) {
     if (already.has(row.id)) continue;
     const text = String(row.data().text ?? '');
@@ -649,6 +740,10 @@ function mapRoom(id: string, data: Record<string, unknown>): Room {
     closedBy: data.closedBy ? String(data.closedBy) : undefined,
     closeReason: closeReason === 'manual' || closeReason === 'timeout' ? closeReason : undefined,
     createdAt: toDate(data.createdAt) ?? undefined,
+    authorOnlyThoughts: data.authorOnlyThoughts === true,
+    createdByParticipantId: data.createdByParticipantId ? String(data.createdByParticipantId) : undefined,
+    createdByName: data.createdByName ? String(data.createdByName) : undefined,
+    createdByEmoji: data.createdByEmoji ? String(data.createdByEmoji) : undefined,
   };
 }
 
@@ -965,5 +1060,9 @@ export async function loadSavedRoom(code: string): Promise<SavedRoom | null> {
     weekStreak: weekStreak(dates),
     liveTopic: live[0],
     pastTopics: past,
+    authorOnlyThoughts: room.authorOnlyThoughts,
+    createdByParticipantId: room.createdByParticipantId,
+    createdByName: room.createdByName,
+    createdByEmoji: room.createdByEmoji,
   };
 }

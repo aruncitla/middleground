@@ -16,7 +16,7 @@ export function CopyButton({ value, label = 'Copy' }: Props) {
       onPress={() => {
         void Clipboard.setStringAsync(value).then(() => {
           setCopied(true);
-          setTimeout(() => setCopied(false), 1600);
+          setTimeout(() => setCopied(false), 2000);
         });
       }}
     />

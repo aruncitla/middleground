@@ -13,14 +13,15 @@ import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { CountdownPill } from '@/components/CountdownPill';
 import { FEEDBACK_ROOM_CODE, FEEDBACK_TOPIC_CODE } from '@/lib/app';
-import { votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
+import { entryBelongsToSeat, thoughtDeck, votableCardIdsForSeat, votingUnlocked } from '@/lib/entries';
 import { isGenericFillerText } from '@/lib/cardQuality';
 import { liveDeadline } from '@/lib/formatEnds';
 import { notify } from '@/lib/notify';
 import { shareConsensusCard } from '@/lib/shareConsensus';
+import { markSwipeAgain } from '@/lib/swipeAgain';
 import { isExampleCard } from '@/lib/starterCards';
 import { avatarById } from '@/lib/theme';
-import { containerCodeOf, closeVotingIfOpen, joinRoom, recordUnanimousAgreements, reopenThoughts, startRoundTwo } from '@/lib/roomService';
+import { containerCodeOf, closeVotingIfOpen, ensureCardsFromEntries, joinRoom, recordUnanimousAgreements, reopenThoughts, startRoundTwo } from '@/lib/roomService';
 import {
   choiceForSeat,
   rosterSeatIds,
@@ -33,6 +34,7 @@ import {
   withVoteTallies,
 } from '@/lib/voteTally';
 import { discussionScore, VOTE_LABELS } from '@/lib/voteChoice';
+import { canShowDiscussionScore, isEarlySignal, totalRoomVotes } from '@/lib/verdictHonesty';
 import { colors, controls, type } from '@/lib/theme';
 import type { Card } from '@/types/room';
 
@@ -53,7 +55,8 @@ export default function SummaryScreen() {
   const endingRef = useRef(false);
 
   const mergedVotes = votes;
-  const talliedCards = useMemo(() => withVoteTallies(cards, mergedVotes), [cards, mergedVotes]);
+  const liveCards = useMemo(() => thoughtDeck(cards, entries), [cards, entries]);
+  const talliedCards = useMemo(() => withVoteTallies(liveCards, mergedVotes), [liveCards, mergedVotes]);
   const reportCards = useMemo(
     () => sortCards(talliedCards.filter((c) => !isGenericFillerText(c.text) && !isExampleCard(c))),
     [talliedCards],
@@ -62,7 +65,7 @@ export default function SummaryScreen() {
   const rosterIds = useMemo(() => rosterSeatIds(seats, participants), [seats, participants]);
   const me = participants.find((p) => p.id === user?.uid);
   const isHost = Boolean(user && room && user.uid === room.hostId);
-  const unlocked = votingUnlocked(entries);
+  const unlocked = votingUnlocked(entries, { authorOnlyThoughts: room?.authorOnlyThoughts });
   const inPlay = room?.status === 'swiping' || (room?.status === 'lobby' && unlocked);
   const isEarly = Boolean(inPlay);
   const resultsLocked = room?.status === 'summary';
@@ -83,11 +86,20 @@ export default function SummaryScreen() {
   const isFollowUp = Boolean(room?.parentRoomId);
   const score = discussionScore(reportCards);
   const people = seats.length || participants.length;
+  const voteTotal = totalRoomVotes(mergedVotes);
+  const showScore = canShowDiscussionScore(mergedVotes, reportCards);
+  const earlySignal = isEarlySignal(mergedVotes);
 
   const leftoverForActive = useMemo(() => {
     if (!activeSeatId) return 0;
     const needed = votableCardIdsForSeat(reportCards, entries, activeSeatId);
-    return needed.filter((id) => !choiceForSeat(mergedVotes, activeSeatId, id)).length;
+    const unvoted = needed.filter((id) => !choiceForSeat(mergedVotes, activeSeatId, id)).length;
+    const pending = entries.filter((entry) => {
+      if (!entry.text.trim()) return false;
+      if (entryBelongsToSeat(entry, { id: activeSeatId })) return false;
+      return !reportCards.some((card) => card.id === entry.id || card.sourceEntryIds?.includes(entry.id));
+    }).length;
+    return unvoted + pending;
   }, [reportCards, entries, mergedVotes, activeSeatId]);
 
   useEffect(() => {
@@ -95,6 +107,11 @@ export default function SummaryScreen() {
     if (room.status === 'synthesizing') router.replace(`/lobby/${code}`);
     if (room.status === 'lobby' && !unlocked) router.replace(`/lobby/${code}`);
   }, [room, unlocked, code, router]);
+
+  useEffect(() => {
+    if (!votingOpen || !code) return;
+    void ensureCardsFromEntries(code).catch(() => {});
+  }, [code, votingOpen, entries.length]);
 
   useEffect(() => {
     if (!votingOpen || !activeSeatId || cardIds.length === 0) return;
@@ -216,10 +233,23 @@ export default function SummaryScreen() {
         <TopicCard>
           <Text style={type.title}>{room?.topic}</Text>
         </TopicCard>
-        <View style={styles.scoreWrap}>
-          <Text style={styles.scoreKicker}>Discussion score</Text>
-          <Text style={styles.score}>{hasVotes ? score : '—'}</Text>
-        </View>
+        {isEarly ? (
+          <View style={styles.liveRow}>
+            <Text style={styles.livePill}>Live results · {voteTotal} {voteTotal === 1 ? 'vote' : 'votes'}</Text>
+            {earlySignal ? <Text style={styles.earlyPill}>Early signal — still changing</Text> : null}
+          </View>
+        ) : null}
+        {showScore ? (
+          <View style={styles.scoreWrap}>
+            <Text style={styles.scoreKicker}>Discussion score</Text>
+            <Text style={styles.score}>{hasVotes ? score : '—'}</Text>
+          </View>
+        ) : (
+          <View style={styles.scoreWrap}>
+            <Text style={styles.earlyChip}>Early signal</Text>
+            <Text style={type.body}>Not enough votes for a score yet</Text>
+          </View>
+        )}
         <ParticipationStats
           participants={participants}
           seats={session.seats}
@@ -246,17 +276,25 @@ export default function SummaryScreen() {
                       : `Voting is still open · ${waitingVote} people haven’t voted yet.`}
             </Text>
             {voteEnds ? <CountdownPill endsAt={voteEnds} /> : null}
-            {votingOpen && leftoverForActive > 0 && seatId && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
+            {votingOpen && seatId && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
               <>
-                <Text style={type.body}>New thoughts came up for voting</Text>
-                <Button label="Swipe again" onPress={() => router.push(`/swipe/${code}?again=1`)} />
+                {leftoverForActive > 0 ? <Text style={type.body}>New thoughts came up for voting</Text> : null}
+                <Button
+                  variant={leftoverForActive > 0 ? undefined : 'secondary'}
+                  label="Swipe again"
+                  onPress={() => {
+                    markSwipeAgain(code);
+                    void ensureCardsFromEntries(code)
+                      .catch(() => {})
+                      .finally(() =>
+                        router.push({
+                          pathname: '/swipe/[code]',
+                          params: { code, again: '1' },
+                        }),
+                      );
+                  }}
+                />
               </>
-            ) : votingOpen && leftoverForActive === 0 && seatId && seatStartedVoting(mergedVotes, seatId, cardIds) ? (
-              <Button
-                variant="secondary"
-                label="Swipe again"
-                onPress={() => router.push(`/swipe/${code}?again=review`)}
-              />
             ) : votingOpen && leftoverForActive > 0 ? (
               <Button
                 label="Vote on the thoughts"
@@ -418,6 +456,24 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     fontWeight: '700',
     letterSpacing: -1.6,
+  },
+  liveRow: { gap: 8 },
+  livePill: {
+    ...type.kicker,
+    alignSelf: 'flex-start',
+    color: colors.teal,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    textTransform: 'uppercase',
+  },
+  earlyPill: { ...type.footnote, color: colors.amber },
+  earlyChip: {
+    ...type.kicker,
+    color: colors.amber,
+    textTransform: 'uppercase',
   },
   share: {
     maxWidth: 420,

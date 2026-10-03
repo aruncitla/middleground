@@ -1,6 +1,7 @@
 export const APP_URL = 'https://amane-middleground.web.app';
 export const APP_HOST = 'amane-middleground.web.app';
-export const DEMO_ROOM_CODE = (process.env.EXPO_PUBLIC_DEMO_ROOM || 'WMF5KU').toUpperCase();
+export const FEATURED_ROOM_CODE = (process.env.EXPO_PUBLIC_FEATURED_ROOM || '54TABA').toUpperCase();
+export const DEMO_ROOM_CODE = (process.env.EXPO_PUBLIC_DEMO_ROOM || FEATURED_ROOM_CODE).toUpperCase();
 export const FEEDBACK_ROOM_CODE = (process.env.EXPO_PUBLIC_FEEDBACK_ROOM || 'FEEDBK').toUpperCase();
 export const FEEDBACK_TOPIC_CODE = (process.env.EXPO_PUBLIC_FEEDBACK_TOPIC || 'FDBACK').toUpperCase();
 

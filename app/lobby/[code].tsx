@@ -2,23 +2,40 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/Button';
-import { CopyButton } from '@/components/CopyButton';
 import { CountdownPill } from '@/components/CountdownPill';
 import { ParticipantCluster } from '@/components/ParticipantCluster';
 import { ParticipationStats } from '@/components/ParticipationStats';
+import { RoomCodeRow } from '@/components/RoomCodeRow';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { Screen } from '@/components/Screen';
 import { SeatGate } from '@/components/SeatGate';
+import { SimilarThoughtPanel } from '@/components/SimilarThoughtPanel';
 import { TopicCard } from '@/components/TopicCard';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
 import { useRoom } from '@/hooks/useRoom';
-import { thoughtShareUrl } from '@/lib/app';
+import { roomShareUrl } from '@/lib/app';
 import { seatEntryCount, sharingSeatCount, votingUnlocked } from '@/lib/entries';
 import { markPlayHintSeen, shouldShowPlayHint } from '@/lib/firstRun';
 import { notify } from '@/lib/notify';
+import { findSimilarThought, type SimilarMatch } from '@/lib/similarThought';
 import { avatarById, colors, controls, type } from '@/lib/theme';
-import { closeVotingIfOpen, containerCodeOf, ensureCardsFromEntries, reopenThoughts, submitEntry } from '@/lib/roomService';
+import {
+  closeVotingIfOpen,
+  containerCodeOf,
+  ensureCardsFromEntries,
+  isRoomAuthor,
+  reopenThoughts,
+  submitEntry,
+} from '@/lib/roomService';
 import type { Participant, Room } from '@/types/room';
+
+function thoughtAuthorLabel(entry: { authorId: string; seatId?: string }, seats: { id: string; displayName: string; avatarId: string }[], participants: Participant[]) {
+  const seat = entry.seatId ? seats.find((row) => row.id === entry.seatId) : null;
+  if (seat) return `${avatarById(seat.avatarId).emoji} ${seat.displayName}`;
+  const person = participants.find((row) => row.id === entry.authorId);
+  if (person) return `${avatarById(person.avatarId).emoji} ${person.displayName}`;
+  return 'Someone in the room';
+}
 
 function closedBanner(room: Room, participants: Participant[]) {
   if (room.closeReason === 'timeout') return 'Time ran out — thoughts are closed.';
@@ -39,11 +56,13 @@ export default function LobbyScreen() {
   const [opening, setOpening] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [hint, setHint] = useState(shouldShowPlayHint);
+  const [similar, setSimilar] = useState<SimilarMatch | null>(null);
   const closingRef = useRef(false);
+  const draftRef = useRef<TextInput>(null);
 
   const msLeft = room?.closesAt ? room.closesAt.getTime() - now : null;
   const timedOut = msLeft != null && msLeft <= 0;
-  const unlocked = votingUnlocked(entries);
+  const unlocked = votingUnlocked(entries, { authorOnlyThoughts: room?.authorOnlyThoughts });
   const sharedSeats = sharingSeatCount(entries);
 
   useEffect(() => {
@@ -91,13 +110,21 @@ export default function LobbyScreen() {
     }
   };
 
-  const onSubmit = async (seatId: string) => {
+  const onSubmit = async (seatId: string, force = false) => {
     if (!user) return;
+    if (!force) {
+      const match = findSimilarThought(draft, entries);
+      if (match) {
+        setSimilar(match);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const created = await submitEntry(code, user.uid, draft, seatId);
       rememberEntry(created);
       setDraft('');
+      setSimilar(null);
       if (hint) {
         markPlayHintSeen();
         setHint(false);
@@ -109,6 +136,12 @@ export default function LobbyScreen() {
     }
   };
 
+  const onVoteTheirs = () => {
+    setSimilar(null);
+    setDraft('');
+    requestAnimationFrame(() => draftRef.current?.focus());
+  };
+
   return (
     <Screen loading={authLoading || !ready} error={authError || (!room && ready ? 'Room not found' : null)}>
       <SeatGate containerCode={container} topicCode={code} uid={user?.uid} required={false}>
@@ -118,6 +151,9 @@ export default function LobbyScreen() {
           const remaining = Math.max(0, (room?.entryLimit ?? 10) - seatEntryCount(entries, session.seat));
           const myThoughts = seatEntryCount(entries, session.seat);
           const canVote = unlocked && !timedOut;
+          const author = isRoomAuthor(room, session.seat?.id, user?.uid);
+          const canCompose = !room?.authorOnlyThoughts || author;
+          const shareCode = container || code;
           return (
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
         <RoomStageBar stage="thoughts" />
@@ -157,7 +193,8 @@ export default function LobbyScreen() {
             <Text style={controls.ghostText}>Add a name to share a thought or vote</Text>
           </Pressable>
         )}
-        <CopyButton value={thoughtShareUrl(code)} />
+        <RoomCodeRow code={shareCode} url={roomShareUrl(shareCode)} />
+        {room?.authorOnlyThoughts ? <Text style={styles.led}>Author-led</Text> : null}
         <TopicCard>
           <Text style={type.title}>{room?.topic}</Text>
           <Text style={type.body}>
@@ -175,8 +212,12 @@ export default function LobbyScreen() {
                   ? 'Time’s up — locking the room…'
                   : 'Time’s up. Voting needed two people with thoughts.'
                 : unlocked
-                  ? 'Two people have shared. You can keep writing or start voting.'
-                  : `Voting opens when two people share a thought · ${sharedSeats}/2 so far`}
+                  ? room?.authorOnlyThoughts
+                    ? 'The author set the thoughts. You can vote when you’re ready.'
+                    : 'Two people have shared. You can keep writing or start voting.'
+                  : room?.authorOnlyThoughts
+                    ? 'Voting opens once the author adds a thought.'
+                    : `Voting opens when two people share a thought · ${sharedSeats}/2 so far`}
             </Text>
           </>
         ) : null}
@@ -191,6 +232,8 @@ export default function LobbyScreen() {
               </View>
             ))}
           </View>
+        ) : room?.authorOnlyThoughts && !author ? (
+          <Text style={type.body}>Waiting for the author to add thoughts.</Text>
         ) : (
           <Text style={type.body}>No thoughts yet. Add yours — or just read along.</Text>
         )}
@@ -207,10 +250,34 @@ export default function LobbyScreen() {
               onPress={() => void onReopen()}
             />
           </>
-        ) : (
+        ) : canCompose ? (
           <>
+            {similar ? (
+              <SimilarThoughtPanel
+                kind={similar.kind}
+                thought={similar.entry.text}
+                author={thoughtAuthorLabel(similar.entry, session.seats, participants)}
+                onVoteTheirs={onVoteTheirs}
+                onAddAnyway={
+                  similar.kind === 'exact'
+                    ? undefined
+                    : () => {
+                        if (!session.seat) {
+                          session.setSwitching(true);
+                          return;
+                        }
+                        void onSubmit(session.seat.id, true);
+                      }
+                }
+                onEditMine={() => {
+                  setSimilar(null);
+                  requestAnimationFrame(() => draftRef.current?.focus());
+                }}
+              />
+            ) : null}
             <Text style={[type.label, styles.label]}>Add your thought ({remaining} left)</Text>
             <TextInput
+              ref={draftRef}
               value={draft}
               onChangeText={setDraft}
               editable={remaining > 0 && room?.status === 'lobby'}
@@ -232,6 +299,10 @@ export default function LobbyScreen() {
               label={submitting ? 'Submitting…' : 'Add thought'}
             />
           </>
+        ) : (
+          <Text style={type.body}>
+            Thoughts are set by the room author. Your job: vote on what’s true for you.
+          </Text>
         )}
 
         {room?.status === 'lobby' ? (
@@ -249,9 +320,13 @@ export default function LobbyScreen() {
             />
             <Text style={type.footnote}>
               {!unlocked
-                ? 'Waiting for one more person to share a thought.'
+                ? room?.authorOnlyThoughts
+                  ? 'Waiting for the author to add thoughts.'
+                  : 'Waiting for one more person to share a thought.'
                 : myThoughts === 0
-                  ? 'You can vote on everyone else’s thoughts, or add yours first.'
+                  ? room?.authorOnlyThoughts
+                    ? 'Vote on the author’s thoughts. You don’t need to add one.'
+                    : 'You can vote on everyone else’s thoughts, or add yours first.'
                   : 'Moves you to voting. Other people can keep sharing.'}
             </Text>
             <Button disabled={submitting || opening} variant="secondary" label="Leave for now" onPress={() => router.replace('/')} />
@@ -279,4 +354,15 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   thoughtText: { ...type.body, color: colors.ink },
+  led: {
+    ...type.kicker,
+    alignSelf: 'flex-start',
+    color: colors.teal,
+    textTransform: 'uppercase',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
 });
