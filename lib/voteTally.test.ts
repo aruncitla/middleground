@@ -9,6 +9,7 @@ import {
   sortCards,
   voteKey,
   voteScreenForSeat,
+  firstPassShouldLeave,
   withVoteTallies,
 } from './voteTally';
 import type { Card, Vote } from '@/types/room';
@@ -60,5 +61,8 @@ assert(voteScreenForSeat({ leftover: 0, hasStarted: true, again: false }) === 's
 assert(voteScreenForSeat({ leftover: 2, hasStarted: true, again: false }) === 'summary', 'new cards wait on early results until they swipe again');
 assert(voteScreenForSeat({ leftover: 2, hasStarted: true, again: true }) === 'swipe', 'swipe again opens leftover cards');
 assert(voteScreenForSeat({ leftover: 0, hasStarted: true, again: true }) === 'swipe', 'swipe again still opens the full deck');
+assert(!firstPassShouldLeave({ leftover: 4, hasStarted: true }), 'voting 1 of N stays on the first pass');
+assert(!firstPassShouldLeave({ leftover: 0, hasStarted: false }), 'no votes yet does not bounce to results');
+assert(firstPassShouldLeave({ leftover: 0, hasStarted: true }), 'the last leftover vote ends the first pass');
 
 console.log('voteTally tests ok');

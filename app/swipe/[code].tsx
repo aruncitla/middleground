@@ -30,11 +30,11 @@ import {
   mergeVotes,
   optimisticVote,
   rosterSeatIds,
+  firstPassShouldLeave,
   seatCompletedDeck,
   seatStartedVoting,
   sortCards,
   voteKey,
-  voteScreenForSeat,
 } from '@/lib/voteTally';
 import type { VoteChoice } from '@/lib/voteChoice';
 import type { Card, Vote } from '@/types/room';
@@ -180,9 +180,10 @@ export default function SwipeCardScreen() {
       }
       return;
     }
-    if (leftoverForActive === 0 && votableCards.filter((c) => !isExampleCard(c)).length === 0 && !hasStarted) return;
-    const screen = voteScreenForSeat({ leftover: leftoverForActive, hasStarted, again: false });
-    if (screen === 'summary') router.replace(`/summary/${code}`);
+    // Stay on the deck until every leftover thought is voted. voteScreenForSeat
+    // would bounce a started seat to results after the first vote.
+    if (!firstPassShouldLeave({ leftover: leftoverForActive, hasStarted })) return;
+    router.replace(`/summary/${code}`);
   }, [
     votingOpen,
     activeSeatId,

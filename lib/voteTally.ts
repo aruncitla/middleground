@@ -102,9 +102,19 @@ export function cardVotingComplete(votes: Vote[], rosterIds: string[], cardId: s
   return rosterIds.length > 0 && rosterIds.every((id) => seatVotedOnCard(votes, id, cardId));
 }
 
-/** Where this seat should be while voting is still open. */
+/**
+ * Results-page routing while voting is still open.
+ * Never-voted seats with leftover cards are sent to swipe. A seat that already
+ * started stays on summary so new leftover cards wait for Swipe again.
+ * Do not use this to leave the swipe deck: leftover + hasStarted is also "voted 1 of N".
+ */
 export function voteScreenForSeat(opts: { leftover: number; hasStarted: boolean; again: boolean }) {
   if (opts.again) return 'swipe' as const;
   if (!opts.hasStarted && opts.leftover > 0) return 'swipe' as const;
   return 'summary' as const;
+}
+
+/** First voting pass leaves swipe only after every leftover card is voted. */
+export function firstPassShouldLeave(opts: { leftover: number; hasStarted: boolean }) {
+  return opts.hasStarted && opts.leftover === 0;
 }

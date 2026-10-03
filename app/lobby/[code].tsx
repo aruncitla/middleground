@@ -8,7 +8,7 @@ import { ParticipationStats } from '@/components/ParticipationStats';
 import { RoomCodeRow } from '@/components/RoomCodeRow';
 import { RoomStageBar } from '@/components/RoomStageBar';
 import { Screen } from '@/components/Screen';
-import { SeatGate } from '@/components/SeatGate';
+import { GuestIdentityFields, SeatGate, type SeatSession } from '@/components/SeatGate';
 import { SimilarThoughtPanel } from '@/components/SimilarThoughtPanel';
 import { TopicCard } from '@/components/TopicCard';
 import { useGuestAuth } from '@/hooks/useGuestAuth';
@@ -17,8 +17,9 @@ import { roomShareUrl } from '@/lib/app';
 import { seatEntryCount, sharingSeatCount, votingUnlocked } from '@/lib/entries';
 import { markPlayHintSeen, shouldShowPlayHint } from '@/lib/firstRun';
 import { notify } from '@/lib/notify';
+import { loadProfile } from '@/lib/profileLocal';
 import { findSimilarThought, type SimilarMatch } from '@/lib/similarThought';
-import { avatarById, colors, controls, type } from '@/lib/theme';
+import { avatarById, colors, controls, type, type AvatarId } from '@/lib/theme';
 import {
   closeVotingIfOpen,
   containerCodeOf,
@@ -59,6 +60,9 @@ export default function LobbyScreen() {
   const [similar, setSimilar] = useState<SimilarMatch | null>(null);
   const closingRef = useRef(false);
   const draftRef = useRef<TextInput>(null);
+  const nameRef = useRef<TextInput>(null);
+  const [guestName, setGuestName] = useState(() => loadProfile().name);
+  const [guestAvatar, setGuestAvatar] = useState<AvatarId>(() => loadProfile().avatarId);
 
   const msLeft = room?.closesAt ? room.closesAt.getTime() - now : null;
   const timedOut = msLeft != null && msLeft <= 0;
@@ -140,6 +144,20 @@ export default function LobbyScreen() {
     setSimilar(null);
     setDraft('');
     requestAnimationFrame(() => draftRef.current?.focus());
+  };
+
+  const withSeat = async (session: SeatSession, then: (seatId: string) => void | Promise<void>) => {
+    if (session.seat) {
+      await then(session.seat.id);
+      return;
+    }
+    if (!guestName.trim()) {
+      nameRef.current?.focus();
+      return;
+    }
+    const seat = await session.ensureSeat({ name: guestName.trim(), avatarId: guestAvatar });
+    if (!seat) return;
+    await then(seat.id);
   };
 
   return (
@@ -262,11 +280,7 @@ export default function LobbyScreen() {
                   similar.kind === 'exact'
                     ? undefined
                     : () => {
-                        if (!session.seat) {
-                          session.setSwitching(true);
-                          return;
-                        }
-                        void onSubmit(session.seat.id, true);
+                        void withSeat(session, (seatId) => onSubmit(seatId, true));
                       }
                 }
                 onEditMine={() => {
@@ -289,15 +303,19 @@ export default function LobbyScreen() {
             />
             <Button
               disabled={submitting || remaining <= 0 || room?.status !== 'lobby' || !draft.trim()}
-              onPress={() => {
-                if (!session.seat) {
-                  session.setSwitching(true);
-                  return;
-                }
-                void onSubmit(session.seat.id);
-              }}
+              onPress={() => void withSeat(session, (seatId) => onSubmit(seatId))}
               label={submitting ? 'Submitting…' : 'Add thought'}
             />
+            {!session.seat ? (
+              <GuestIdentityFields
+                name={guestName}
+                avatarId={guestAvatar}
+                onNameChange={setGuestName}
+                onAvatarChange={setGuestAvatar}
+                nameRef={nameRef}
+                note="Put your name here so the room knows this thought is yours. No account."
+              />
+            ) : null}
           </>
         ) : (
           <Text style={type.body}>
@@ -310,13 +328,7 @@ export default function LobbyScreen() {
             <Button
               disabled={opening || !canVote}
               label={opening ? 'Opening…' : 'Done sharing — vote'}
-              onPress={() => {
-                if (!session.seat) {
-                  session.setSwitching(true);
-                  return;
-                }
-                void onGoVote();
-              }}
+              onPress={() => void withSeat(session, () => onGoVote())}
             />
             <Text style={type.footnote}>
               {!unlocked

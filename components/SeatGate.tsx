@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useState, type Ref } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/Button';
 import { avatarById, avatars, colors, controls, type, type AvatarId } from '@/lib/theme';
@@ -20,15 +20,18 @@ import {
 } from '@/lib/seatsLocal';
 import type { Participant, Seat } from '@/types/room';
 
+export type SeatDraft = { name: string; avatarId: AvatarId };
+
 export type SeatSession = {
   seat: Seat | null;
   seats: Seat[];
   mySeats: Seat[];
   switching: boolean;
   setSwitching: (open: boolean) => void;
+  ensureSeat: (draft: SeatDraft) => Promise<Seat | null>;
 };
 
-type Draft = { name: string; avatarId: AvatarId };
+type Draft = SeatDraft;
 
 function pickActive(seats: Seat[], uid: string, containerCode: string) {
   const local = loadLocalSeats(containerCode);
@@ -140,6 +143,56 @@ export async function claimExistingSeat(
   }
 }
 
+export function GuestIdentityFields({
+  name,
+  avatarId,
+  onNameChange,
+  onAvatarChange,
+  nameRef,
+  note = 'A name and emoji so the room knows which thoughts are yours. No account.',
+}: {
+  name: string;
+  avatarId: AvatarId;
+  onNameChange: (value: string) => void;
+  onAvatarChange: (id: AvatarId) => void;
+  nameRef?: Ref<TextInput>;
+  note?: string;
+}) {
+  return (
+    <View style={styles.identity}>
+      <Text style={type.footnote}>{note}</Text>
+      <Text style={[type.label, styles.label]}>Your name</Text>
+      <TextInput
+        ref={nameRef}
+        value={name}
+        onChangeText={onNameChange}
+        placeholder="Your name"
+        autoComplete="name"
+        placeholderTextColor={colors.faint}
+        style={controls.input}
+        {...({ dataSet: { mgInput: true } } as object)}
+      />
+      <Text style={[type.label, styles.label]}>Emoji</Text>
+      <View style={styles.avatars}>
+        {avatars.map((a) => (
+          <Pressable
+            key={a.id}
+            onPress={() => onAvatarChange(a.id)}
+            accessibilityRole="button"
+            style={[
+              styles.avatar,
+              { backgroundColor: a.color },
+              avatarId === a.id && styles.avatarOn,
+            ]}
+          >
+            <Text style={styles.emoji}>{a.emoji}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export function SeatPicker({
   title,
   confirmLabel,
@@ -170,34 +223,12 @@ export function SeatPicker({
   return (
     <View style={styles.panel}>
       <Text style={type.section}>{title}</Text>
-      <Text style={type.footnote}>A name and emoji so the room knows which thoughts are yours. No account.</Text>
-      <Text style={[type.label, styles.label]}>Your name</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="Your name"
-        autoComplete="name"
-        placeholderTextColor={colors.faint}
-        style={controls.input}
-        {...({ dataSet: { mgInput: true } } as object)}
+      <GuestIdentityFields
+        name={name}
+        avatarId={avatarId}
+        onNameChange={setName}
+        onAvatarChange={setAvatarId}
       />
-      <Text style={[type.label, styles.label]}>Emoji</Text>
-      <View style={styles.avatars}>
-        {avatars.map((a) => (
-          <Pressable
-            key={a.id}
-            onPress={() => setAvatarId(a.id)}
-            accessibilityRole="button"
-            style={[
-              styles.avatar,
-              { backgroundColor: a.color },
-              avatarId === a.id && styles.avatarOn,
-            ]}
-          >
-            <Text style={styles.emoji}>{a.emoji}</Text>
-          </Pressable>
-        ))}
-      </View>
       <Button
         disabled={busy || !name.trim()}
         label={busy ? 'Working…' : confirmLabel}
@@ -309,10 +340,10 @@ export function SeatGate({
     }
   }, [session.active?.id, session.active?.displayName, session.active?.avatarId, uid, containerCode, topicCode]);
 
-  const submitClaim = async (draft: Draft, forceNew: boolean) => {
+  const submitClaim = async (draft: Draft, forceNew: boolean): Promise<Seat | null> => {
     if (!containerCode || !uid) {
       setError('Still signing you in. Try again in a moment.');
-      return;
+      return null;
     }
     setBusy(true);
     setError(null);
@@ -320,21 +351,28 @@ export function SeatGate({
       const existing = matchSeat(session.seats, draft.name, draft.avatarId);
       if (existing && !forceNew) {
         setPending(existing);
-        return;
+        return null;
       }
       // Already have a seat in this room: a unique name+emoji must mint another, not reuse mine[0].
       const another = forceNew || session.mySeats.length > 0;
       const seat = await claimNewSeat(containerCode, topicCode, uid, draft.name, draft.avatarId, another);
       session.activate(seat.id);
+      return seat;
     } catch (e) {
       if (isSeatTakenError(e)) {
         setPending(e.seat);
-        return;
+        return null;
       }
       setError(e instanceof Error ? e.message : String(e));
+      return null;
     } finally {
       setBusy(false);
     }
+  };
+
+  const ensureSeat = async (draft: Draft) => {
+    if (session.active) return session.active;
+    return submitClaim(draft, false);
   };
 
   const onReclaim = async () => {
@@ -389,6 +427,7 @@ export function SeatGate({
           mySeats: session.mySeats,
           switching: session.switching,
           setSwitching: session.setSwitching,
+          ensureSeat,
         })
       ) : (
         children({
@@ -397,6 +436,7 @@ export function SeatGate({
           mySeats: session.mySeats,
           switching: session.switching,
           setSwitching: session.setSwitching,
+          ensureSeat,
         })
       )}
     </>
@@ -409,6 +449,7 @@ export function SeatGate({
 const styles = StyleSheet.create({
   gate: { flex: 1, padding: 20, justifyContent: 'center' },
   panel: { ...controls.panel, gap: 10 },
+  identity: { gap: 8 },
   label: { marginTop: 4 },
   avatars: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   avatar: {
